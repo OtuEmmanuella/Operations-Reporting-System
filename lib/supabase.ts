@@ -1,0 +1,204 @@
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+
+export type Database = {
+  public: {
+    Tables: {
+      users: {
+        Row: {
+          id: string
+          email: string
+          full_name: string
+          role: 'manager' | 'bdm'
+          created_at: string
+        }
+        Insert: {
+          id: string
+          email: string
+          full_name: string
+          role: 'manager' | 'bdm'
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          email?: string
+          full_name?: string
+          role?: 'manager' | 'bdm'
+          created_at?: string
+        }
+      }
+      stock_reports: {
+        Row: {
+          id: string
+          manager_id: string
+          report_date: string
+          status: 'pending' | 'approved' | 'rejected'
+          notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          manager_id: string
+          report_date: string
+          status?: 'pending' | 'approved' | 'rejected'
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          manager_id?: string
+          report_date?: string
+          status?: 'pending' | 'approved' | 'rejected'
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      stock_report_items: {
+        Row: {
+          id: string
+          report_id: string
+          item_name: string
+          quantity: number
+          unit: string
+        }
+        Insert: {
+          id?: string
+          report_id: string
+          item_name: string
+          quantity: number
+          unit: string
+        }
+        Update: {
+          id?: string
+          report_id?: string
+          item_name?: string
+          quantity?: number
+          unit?: string
+        }
+      }
+      sales_reports: {
+        Row: {
+          id: string
+          manager_id: string
+          report_date: string
+          total_amount: number
+          status: 'pending' | 'approved' | 'rejected'
+          notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          manager_id: string
+          report_date: string
+          total_amount: number
+          status?: 'pending' | 'approved' | 'rejected'
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          manager_id?: string
+          report_date?: string
+          total_amount?: number
+          status?: 'pending' | 'approved' | 'rejected'
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      sales_report_items: {
+        Row: {
+          id: string
+          report_id: string
+          product_name: string
+          quantity: number
+          unit_price: number
+          total_price: number
+        }
+        Insert: {
+          id?: string
+          report_id: string
+          product_name: string
+          quantity: number
+          unit_price: number
+          total_price: number
+        }
+        Update: {
+          id?: string
+          report_id?: string
+          product_name?: string
+          quantity?: number
+          unit_price?: number
+          total_price?: number
+        }
+      }
+      expense_reports: {
+        Row: {
+          id: string
+          manager_id: string
+          report_date: string
+          total_amount: number
+          status: 'pending' | 'approved' | 'rejected'
+          notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          manager_id: string
+          report_date: string
+          total_amount: number
+          status?: 'pending' | 'approved' | 'rejected'
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          manager_id?: string
+          report_date?: string
+          total_amount?: number
+          status?: 'pending' | 'approved' | 'rejected'
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      expense_report_items: {
+        Row: {
+          id: string
+          report_id: string
+          item_name: string
+          quantity: number
+          unit_price: number
+          total_price: number
+          supplier: string | null
+        }
+        Insert: {
+          id?: string
+          report_id: string
+          item_name: string
+          quantity: number
+          unit_price: number
+          total_price: number
+          supplier?: string | null
+        }
+        Update: {
+          id?: string
+          report_id?: string
+          item_name?: string
+          quantity?: number
+          unit_price?: number
+          total_price?: number
+          supplier?: string | null
+        }
+      }
+    }
+  }
+}
+
+export const supabase = createClientComponentClient<Database>()
