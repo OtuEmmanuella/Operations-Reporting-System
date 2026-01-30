@@ -10,6 +10,8 @@ export type Database = {
           full_name: string
           role: 'manager' | 'bdm'
           created_at: string
+          department: string | null
+          position: string | null
         }
         Insert: {
           id: string
@@ -17,6 +19,8 @@ export type Database = {
           full_name: string
           role: 'manager' | 'bdm'
           created_at?: string
+          department?: string | null
+          position?: string | null
         }
         Update: {
           id?: string
@@ -24,6 +28,8 @@ export type Database = {
           full_name?: string
           role?: 'manager' | 'bdm'
           created_at?: string
+          department?: string | null
+          position?: string | null
         }
       }
       stock_reports: {
@@ -35,6 +41,11 @@ export type Database = {
           notes: string | null
           created_at: string
           updated_at: string
+          rejection_reason: string | null
+          rejection_feedback: string | null
+          resubmission_deadline: string | null
+          reviewed_by: string | null
+          reviewed_at: string | null
         }
         Insert: {
           id?: string
@@ -44,6 +55,11 @@ export type Database = {
           notes?: string | null
           created_at?: string
           updated_at?: string
+          rejection_reason?: string | null
+          rejection_feedback?: string | null
+          resubmission_deadline?: string | null
+          reviewed_by?: string | null
+          reviewed_at?: string | null
         }
         Update: {
           id?: string
@@ -53,6 +69,11 @@ export type Database = {
           notes?: string | null
           created_at?: string
           updated_at?: string
+          rejection_reason?: string | null
+          rejection_feedback?: string | null
+          resubmission_deadline?: string | null
+          reviewed_by?: string | null
+          reviewed_at?: string | null
         }
       }
       stock_report_items: {
@@ -88,6 +109,11 @@ export type Database = {
           notes: string | null
           created_at: string
           updated_at: string
+          rejection_reason: string | null
+          rejection_feedback: string | null
+          resubmission_deadline: string | null
+          reviewed_by: string | null
+          reviewed_at: string | null
         }
         Insert: {
           id?: string
@@ -98,6 +124,11 @@ export type Database = {
           notes?: string | null
           created_at?: string
           updated_at?: string
+          rejection_reason?: string | null
+          rejection_feedback?: string | null
+          resubmission_deadline?: string | null
+          reviewed_by?: string | null
+          reviewed_at?: string | null
         }
         Update: {
           id?: string
@@ -108,6 +139,11 @@ export type Database = {
           notes?: string | null
           created_at?: string
           updated_at?: string
+          rejection_reason?: string | null
+          rejection_feedback?: string | null
+          resubmission_deadline?: string | null
+          reviewed_by?: string | null
+          reviewed_at?: string | null
         }
       }
       sales_report_items: {
@@ -146,6 +182,11 @@ export type Database = {
           notes: string | null
           created_at: string
           updated_at: string
+          rejection_reason: string | null
+          rejection_feedback: string | null
+          resubmission_deadline: string | null
+          reviewed_by: string | null
+          reviewed_at: string | null
         }
         Insert: {
           id?: string
@@ -156,6 +197,11 @@ export type Database = {
           notes?: string | null
           created_at?: string
           updated_at?: string
+          rejection_reason?: string | null
+          rejection_feedback?: string | null
+          resubmission_deadline?: string | null
+          reviewed_by?: string | null
+          reviewed_at?: string | null
         }
         Update: {
           id?: string
@@ -166,6 +212,11 @@ export type Database = {
           notes?: string | null
           created_at?: string
           updated_at?: string
+          rejection_reason?: string | null
+          rejection_feedback?: string | null
+          resubmission_deadline?: string | null
+          reviewed_by?: string | null
+          reviewed_at?: string | null
         }
       }
       expense_report_items: {

@@ -51,12 +51,12 @@ export default function LoginPage() {
         
         const { error: insertError } = await supabase
           .from('users')
-          .insert({
+          .insert([{
             id: data.user.id,
             email: data.user.email!,
             full_name: fullName,
             role: role
-          })
+          }])
 
         if (insertError) {
           console.error('Error creating user:', insertError)

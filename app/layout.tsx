@@ -2,7 +2,7 @@ import './globals.css'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Manager Reporting System',
+  title: 'Operations Reporting System',
   description: 'Sales and inventory management system',
 }
 

@@ -1,19 +1,81 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Home, Package, DollarSign, FileText, BarChart3, LogOut, Users, Bell } from 'lucide-react'
+import { Home, Package, DollarSign, FileText, BarChart3, LogOut, Users, Bell, CheckCircle, XCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import clsx from 'clsx'
 
-interface SidebarProps {
-  userRole: 'manager' | 'bdm'
-  userName: string
+interface UserProfile {
+  full_name: string
+  role: 'manager' | 'bdm'
+  position?: string | null
+  department?: string | null
 }
 
-export default function Sidebar({ userRole, userName }: SidebarProps) {
+export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    loadUserProfile()
+  }, [])
+
+  const loadUserProfile = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      if (!user) {
+        router.push('/')
+        return
+      }
+
+      // Fetch user profile from users table
+      const { data: profile, error } = await supabase
+        .from('users')
+        .select('full_name, role, position, department')
+        .eq('id', user.id)
+        .single()
+
+      if (error) {
+        console.error('Error loading user profile:', error)
+        // If profile doesn't exist, create it
+        if (error.code === 'PGRST116') {
+          const role: 'manager' | 'bdm' = user.email?.includes('bdm') ? 'bdm' : 'manager'
+          const fullName = user.email?.split('@')[0] || 'User'
+          
+          const { error: insertError } = await supabase
+            .from('users')
+            .insert({
+              id: user.id,
+              email: user.email!,
+              full_name: fullName,
+              role: role
+            })
+
+          if (!insertError) {
+            setUserProfile({
+              full_name: fullName,
+              role: role,
+              position: null,
+              department: null
+            })
+          } else {
+            console.error('Error creating profile:', insertError)
+          }
+        }
+      } else {
+        setUserProfile(profile)
+      }
+    } catch (error) {
+      console.error('Error in loadUserProfile:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -30,22 +92,59 @@ export default function Sidebar({ userRole, userName }: SidebarProps) {
 
   const bdmLinks = [
     { href: '/bdm/dashboard', label: 'Home', icon: Home },
-    { href: '/bdm/pending', label: 'Pending', icon: Bell },
+    { href: '/bdm/pending', label: 'Pending Reports', icon: Bell },
+    { href: '/bdm/approved', label: 'Approved Reports', icon: CheckCircle },
+    { href: '/bdm/rejected', label: 'Rejected Reports', icon: XCircle },
     { href: '/bdm/analytics', label: 'Analytics', icon: BarChart3 },
     { href: '/bdm/managers', label: 'Managers', icon: Users },
   ]
 
-  const links = userRole === 'manager' ? managerLinks : bdmLinks
+  if (loading || !userProfile) {
+    return (
+      <div className="w-64 bg-white border-r border-gray-200 h-screen flex items-center justify-center">
+        <div className="text-gray-600">Loading...</div>
+      </div>
+    )
+  }
+
+  const links = userProfile.role === 'manager' ? managerLinks : bdmLinks
+
+  // Get initials from name
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(word => word.charAt(0))
+      .join('')
+      .toUpperCase()
+      .slice(0, 2)
+  }
 
   return (
     <div className="w-64 bg-white border-r border-gray-200 h-screen flex flex-col">
-      {/* Logo/Header */}
+      {/* User Profile Section */}
       <div className="p-6 border-b border-gray-200">
-        <h2 className="text-xl font-bold text-primary">MRS</h2>
-        <p className="text-sm text-gray-600 mt-1">{userName}</p>
-        <span className="inline-block mt-2 px-2 py-1 text-xs font-medium bg-primary/10 text-primary rounded">
-          {userRole === 'manager' ? 'Manager' : 'BDM'}
-        </span>
+        <div className="flex items-center space-x-3 mb-3">
+          {/* Avatar with Initials */}
+          <div className="w-12 h-12 bg-primary rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0">
+            {getInitials(userProfile.full_name)}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-sm font-semibold text-gray-900 truncate">{userProfile.full_name}</h2>
+            <p className="text-xs text-gray-500 truncate">
+              {userProfile.position || (userProfile.role === 'manager' ? 'Manager' : 'Business Development Manager')}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="inline-block px-2 py-0.5 text-xs font-medium bg-primary/10 text-primary rounded">
+            {userProfile.role === 'manager' ? 'Manager' : 'BDM'}
+          </span>
+          {userProfile.department && (
+            <span className="text-xs text-gray-500 truncate max-w-[100px]">
+              {userProfile.department}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Navigation Links */}
