@@ -19,6 +19,14 @@ interface ReportDetail {
   items?: any[]
 }
 
+// Helper function to format currency with null/undefined safety
+const formatCurrency = (amount: number | null | undefined): string => {
+  if (amount === null || amount === undefined) {
+    return '₦0.00'
+  }
+  return `₦${amount.toFixed(2)}`
+}
+
 export default function ReviewReportPage() {
   const router = useRouter()
   const params = useParams()
@@ -109,12 +117,12 @@ export default function ReviewReportPage() {
       
       const tableName = `${type}_reports`
       const { error } = await supabase
-        .from(tableName as any)
+        .from(tableName as 'stock_reports' | 'sales_reports' | 'expense_reports')
         .update({
           status: 'approved',
           reviewed_by: user?.id,
           reviewed_at: new Date().toISOString(),
-        } as any)
+        })
         .eq('id', id)
 
       if (error) throw error
@@ -141,7 +149,7 @@ export default function ReviewReportPage() {
       
       const tableName = `${type}_reports`
       const { error } = await supabase
-        .from(tableName as any)
+        .from(tableName as 'stock_reports' | 'sales_reports' | 'expense_reports')
         .update({
           status: 'rejected',
           rejection_reason: rejectionReason,
@@ -149,7 +157,7 @@ export default function ReviewReportPage() {
           resubmission_deadline: resubmissionDeadline || null,
           reviewed_by: user?.id,
           reviewed_at: new Date().toISOString(),
-        } as any)
+        })
         .eq('id', id)
 
       if (error) throw error
@@ -257,7 +265,7 @@ export default function ReviewReportPage() {
         {report.total_amount !== undefined && (
           <div className="mb-4 p-4 bg-gray-50 rounded-lg">
             <div className="text-sm text-gray-600">Total Amount</div>
-            <div className="text-2xl font-bold text-gray-900">₦{report.total_amount.toFixed(2)}</div>
+            <div className="text-2xl font-bold text-gray-900">{formatCurrency(report.total_amount)}</div>
           </div>
         )}
 
@@ -316,16 +324,20 @@ export default function ReviewReportPage() {
                         <>
                           <td className="px-6 py-4 text-sm text-gray-900">{item.product_name}</td>
                           <td className="px-6 py-4 text-sm text-gray-900">{item.quantity}</td>
-                          <td className="px-6 py-4 text-sm text-gray-900">₦{item.unit_price.toFixed(2)}</td>
-                          <td className="px-6 py-4 text-sm font-semibold text-gray-900">₦{item.total_price.toFixed(2)}</td>
+                          <td className="px-6 py-4 text-sm text-gray-900">{formatCurrency(item.unit_price)}</td>
+                          <td className="px-6 py-4 text-sm font-semibold text-gray-900">{formatCurrency(item.total_price)}</td>
                         </>
                       )}
                       {type === 'expense' && (
                         <>
                           <td className="px-6 py-4 text-sm text-gray-900">{item.item_name}</td>
-                          <td className="px-6 py-4 text-sm text-gray-900">{item.quantity}</td>
-                          <td className="px-6 py-4 text-sm text-gray-900">₦{item.unit_price.toFixed(2)}</td>
-                          <td className="px-6 py-4 text-sm font-semibold text-gray-900">₦{item.total_price.toFixed(2)}</td>
+                          <td className="px-6 py-4 text-sm text-gray-900">{item.quantity || 0}</td>
+                          <td className="px-6 py-4 text-sm text-gray-900">
+                            {formatCurrency(item.unit_price)}
+                          </td>
+                          <td className="px-6 py-4 text-sm font-semibold text-gray-900">
+                            {formatCurrency(item.total_price)}
+                          </td>
                           <td className="px-6 py-4 text-sm text-gray-900">{item.supplier || 'N/A'}</td>
                         </>
                       )}

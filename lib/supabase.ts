@@ -177,7 +177,6 @@ export type Database = {
           id: string
           manager_id: string
           report_date: string
-          total_amount: number
           status: 'pending' | 'approved' | 'rejected'
           notes: string | null
           created_at: string
@@ -192,7 +191,6 @@ export type Database = {
           id?: string
           manager_id: string
           report_date: string
-          total_amount: number
           status?: 'pending' | 'approved' | 'rejected'
           notes?: string | null
           created_at?: string
@@ -207,7 +205,6 @@ export type Database = {
           id?: string
           manager_id?: string
           report_date?: string
-          total_amount?: number
           status?: 'pending' | 'approved' | 'rejected'
           notes?: string | null
           created_at?: string
@@ -225,27 +222,18 @@ export type Database = {
           report_id: string
           item_name: string
           quantity: number
-          unit_price: number
-          total_price: number
-          supplier: string | null
         }
         Insert: {
           id?: string
           report_id: string
           item_name: string
           quantity: number
-          unit_price: number
-          total_price: number
-          supplier?: string | null
         }
         Update: {
           id?: string
           report_id?: string
           item_name?: string
           quantity?: number
-          unit_price?: number
-          total_price?: number
-          supplier?: string | null
         }
       }
     }

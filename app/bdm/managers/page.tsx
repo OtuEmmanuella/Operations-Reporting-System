@@ -20,6 +20,10 @@ interface ManagerStats {
   rejected: number
 }
 
+interface ReportStatus {
+  status: 'pending' | 'approved' | 'rejected'
+}
+
 export default function ManagersPage() {
   const [loading, setLoading] = useState(true)
   const [managers, setManagers] = useState<Manager[]>([])
@@ -33,29 +37,30 @@ export default function ManagersPage() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('*')
+        .select('id, full_name, email, position, department, created_at')
         .eq('role', 'manager')
         .order('full_name')
 
       if (error) throw error
 
-      setManagers(data || [])
+      const managersData = (data || []) as Manager[]
+      setManagers(managersData)
 
       // Load stats for each manager
-      if (data) {
+      if (managersData.length > 0) {
         const statsMap = new Map<string, ManagerStats>()
         
-        for (const manager of data) {
+        for (const manager of managersData) {
           const [stockData, salesData, expenseData] = await Promise.all([
             supabase.from('stock_reports').select('status').eq('manager_id', manager.id),
             supabase.from('sales_reports').select('status').eq('manager_id', manager.id),
             supabase.from('expense_reports').select('status').eq('manager_id', manager.id),
           ])
 
-          const allReports = [
-            ...(stockData.data || []),
-            ...(salesData.data || []),
-            ...(expenseData.data || []),
+          const allReports: ReportStatus[] = [
+            ...(stockData.data || []) as ReportStatus[],
+            ...(salesData.data || []) as ReportStatus[],
+            ...(expenseData.data || []) as ReportStatus[],
           ]
 
           statsMap.set(manager.id, {

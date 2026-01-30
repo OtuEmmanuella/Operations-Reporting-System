@@ -147,7 +147,7 @@ export default function ApprovedReportsPage() {
           type: 'sales' as const,
           report_date: r.report_date,
           approved_at: r.reviewed_at || '',
-          total_amount: r.total_amount,
+          total_amount: r.total_amount || undefined,
           notes: r.notes || undefined,
         })),
         ...(expenseData.data || []).map((r: ExpenseReport) => ({
@@ -155,7 +155,7 @@ export default function ApprovedReportsPage() {
           type: 'expense' as const,
           report_date: r.report_date,
           approved_at: r.reviewed_at || '',
-          total_amount: r.total_amount,
+          total_amount: r.total_amount || undefined,
           notes: r.notes || undefined,
         })),
       ]

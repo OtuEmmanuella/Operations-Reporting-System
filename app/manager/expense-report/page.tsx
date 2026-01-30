@@ -9,9 +9,19 @@ import Link from 'next/link'
 interface ExpenseItem {
   item_name: string
   quantity: number
-  unit_price: number
-  total_price: number
-  supplier: string
+}
+
+interface ExpenseReportInsert {
+  manager_id: string
+  report_date: string
+  notes: string | null
+  status: string
+}
+
+interface ExpenseItemInsert {
+  report_id: string
+  item_name: string
+  quantity: number
 }
 
 export default function ExpenseReportPage() {
@@ -20,11 +30,11 @@ export default function ExpenseReportPage() {
   const [reportDate, setReportDate] = useState(new Date().toISOString().split('T')[0])
   const [notes, setNotes] = useState('')
   const [items, setItems] = useState<ExpenseItem[]>([
-    { item_name: '', quantity: 0, unit_price: 0, total_price: 0, supplier: '' }
+    { item_name: '', quantity: 0 }
   ])
 
   const addItem = () => {
-    setItems([...items, { item_name: '', quantity: 0, unit_price: 0, total_price: 0, supplier: '' }])
+    setItems([...items, { item_name: '', quantity: 0 }])
   }
 
   const removeItem = (index: number) => {
@@ -36,19 +46,7 @@ export default function ExpenseReportPage() {
   const updateItem = (index: number, field: keyof ExpenseItem, value: string | number) => {
     const newItems = [...items]
     newItems[index] = { ...newItems[index], [field]: value }
-    
-    // Auto-calculate total price
-    if (field === 'quantity' || field === 'unit_price') {
-      const quantity = field === 'quantity' ? Number(value) : newItems[index].quantity
-      const unitPrice = field === 'unit_price' ? Number(value) : newItems[index].unit_price
-      newItems[index].total_price = quantity * unitPrice
-    }
-    
     setItems(newItems)
-  }
-
-  const getTotalAmount = () => {
-    return items.reduce((sum, item) => sum + item.total_price, 0)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -61,7 +59,7 @@ export default function ExpenseReportPage() {
 
       // Validate items
       const validItems = items.filter(item => 
-        item.item_name.trim() !== '' && item.quantity > 0 && item.unit_price > 0
+        item.item_name.trim() !== '' && item.quantity > 0
       )
 
       if (validItems.length === 0) {
@@ -70,31 +68,27 @@ export default function ExpenseReportPage() {
         return
       }
 
-      const totalAmount = getTotalAmount()
-
       // Insert expense report
+      const reportInsert: ExpenseReportInsert = {
+        manager_id: user.id,
+        report_date: reportDate,
+        notes: notes || null,
+        status: 'pending',
+      }
+
       const { data: report, error: reportError } = await supabase
         .from('expense_reports')
-        .insert({
-          manager_id: user.id,
-          report_date: reportDate,
-          total_amount: totalAmount,
-          notes: notes || null,
-          status: 'pending',
-        })
+        .insert(reportInsert)
         .select()
         .single()
 
       if (reportError) throw reportError
 
       // Insert expense items
-      const itemsToInsert = validItems.map(item => ({
+      const itemsToInsert: ExpenseItemInsert[] = validItems.map(item => ({
         report_id: report.id,
         item_name: item.item_name,
         quantity: Number(item.quantity),
-        unit_price: Number(item.unit_price),
-        total_price: Number(item.total_price),
-        supplier: item.supplier || null,
       }))
 
       const { error: itemsError } = await supabase
@@ -114,7 +108,7 @@ export default function ExpenseReportPage() {
   }
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="p-8 max-w-4xl mx-auto">
       <div className="mb-6">
         <Link 
           href="/manager/dashboard" 
@@ -160,7 +154,7 @@ export default function ExpenseReportPage() {
           <div className="space-y-4">
             {items.map((item, index) => (
               <div key={index} className="flex gap-4 items-start p-4 bg-gray-50 rounded-lg">
-                <div className="flex-1 grid grid-cols-1 md:grid-cols-5 gap-4">
+                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Item Name
@@ -170,7 +164,7 @@ export default function ExpenseReportPage() {
                       value={item.item_name}
                       onChange={(e) => updateItem(index, 'item_name', e.target.value)}
                       className="input-field"
-                      placeholder="e.g., Office Supplies"
+                      placeholder="e.g., Office Supplies, Cleaning Materials"
                       required
                     />
                   </div>
@@ -180,51 +174,13 @@ export default function ExpenseReportPage() {
                     </label>
                     <input
                       type="number"
-                      min="0"
+                      min="1"
                       step="1"
                       value={item.quantity || ''}
                       onChange={(e) => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
                       className="input-field"
                       placeholder="0"
                       required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Unit Price (₦)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={item.unit_price || ''}
-                      onChange={(e) => updateItem(index, 'unit_price', parseFloat(e.target.value) || 0)}
-                      className="input-field"
-                      placeholder="0.00"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Supplier
-                    </label>
-                    <input
-                      type="text"
-                      value={item.supplier}
-                      onChange={(e) => updateItem(index, 'supplier', e.target.value)}
-                      className="input-field"
-                      placeholder="e.g., Store Name"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Total (₦)
-                    </label>
-                    <input
-                      type="number"
-                      value={item.total_price.toFixed(2)}
-                      className="input-field bg-gray-100"
-                      disabled
                     />
                   </div>
                 </div>
@@ -239,14 +195,6 @@ export default function ExpenseReportPage() {
                 )}
               </div>
             ))}
-          </div>
-
-          {/* Total Amount Display */}
-          <div className="mt-6 p-4 bg-primary/5 rounded-lg">
-            <div className="flex justify-between items-center">
-              <span className="text-lg font-semibold text-gray-900">Total Expense Amount:</span>
-              <span className="text-2xl font-bold text-primary">₦{getTotalAmount().toFixed(2)}</span>
-            </div>
           </div>
         </div>
 

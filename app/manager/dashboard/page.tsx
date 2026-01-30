@@ -21,6 +21,27 @@ interface RecentReport {
   created_at: string
 }
 
+interface StockReportData {
+  id: string
+  report_date: string
+  status: 'pending' | 'approved' | 'rejected'
+  created_at: string
+}
+
+interface SalesReportData {
+  id: string
+  report_date: string
+  status: 'pending' | 'approved' | 'rejected'
+  created_at: string
+}
+
+interface ExpenseReportData {
+  id: string
+  report_date: string
+  status: 'pending' | 'approved' | 'rejected'
+  created_at: string
+}
+
 export default function ManagerDashboard() {
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState<ReportStats>({ total: 0, pending: 0, approved: 0, rejected: 0 })
@@ -43,9 +64,9 @@ export default function ManagerDashboard() {
       ])
 
       const allReports = [
-        ...(stockData.data || []).map(r => ({ ...r, type: 'stock' as const })),
-        ...(salesData.data || []).map(r => ({ ...r, type: 'sales' as const })),
-        ...(expenseData.data || []).map(r => ({ ...r, type: 'expense' as const })),
+        ...(stockData.data || []).map((r: StockReportData) => ({ ...r, type: 'stock' as const })),
+        ...(salesData.data || []).map((r: SalesReportData) => ({ ...r, type: 'sales' as const })),
+        ...(expenseData.data || []).map((r: ExpenseReportData) => ({ ...r, type: 'expense' as const })),
       ]
 
       // Calculate stats
