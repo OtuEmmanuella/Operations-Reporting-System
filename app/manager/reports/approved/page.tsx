@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { CheckCircle, Package, DollarSign, FileText, Calendar } from 'lucide-react'
+import { CheckCircle, Package, DollarSign, FileText, Calendar, Eye, User } from 'lucide-react'
 import { format } from 'date-fns'
 
 interface ApprovedReport {
@@ -10,11 +11,13 @@ interface ApprovedReport {
   type: 'stock' | 'sales' | 'expense'
   report_date: string
   reviewed_at: string
+  reviewed_by_name: string
   total_amount?: number
   notes?: string
 }
 
 export default function ManagerApprovedReportsPage() {
+  const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [reports, setReports] = useState<ApprovedReport[]>([])
 
@@ -30,19 +33,19 @@ export default function ManagerApprovedReportsPage() {
       const [stockData, salesData, expenseData] = await Promise.all([
         supabase
           .from('stock_reports')
-          .select('*')
+          .select('*, reviewer:users!stock_reports_reviewed_by_fkey(full_name)')
           .eq('manager_id', user.id)
           .eq('status', 'approved')
           .order('reviewed_at', { ascending: false }),
         supabase
           .from('sales_reports')
-          .select('*')
+          .select('*, reviewer:users!sales_reports_reviewed_by_fkey(full_name)')
           .eq('manager_id', user.id)
           .eq('status', 'approved')
           .order('reviewed_at', { ascending: false }),
         supabase
           .from('expense_reports')
-          .select('*')
+          .select('*, reviewer:users!expense_reports_reviewed_by_fkey(full_name)')
           .eq('manager_id', user.id)
           .eq('status', 'approved')
           .order('reviewed_at', { ascending: false }),
@@ -54,6 +57,7 @@ export default function ManagerApprovedReportsPage() {
           type: 'stock' as const,
           report_date: r.report_date,
           reviewed_at: r.reviewed_at,
+          reviewed_by_name: r.reviewer?.full_name || 'BDM',
           notes: r.notes,
         })),
         ...(salesData.data || []).map((r: any) => ({
@@ -61,6 +65,7 @@ export default function ManagerApprovedReportsPage() {
           type: 'sales' as const,
           report_date: r.report_date,
           reviewed_at: r.reviewed_at,
+          reviewed_by_name: r.reviewer?.full_name || 'BDM',
           total_amount: r.total_amount,
           notes: r.notes,
         })),
@@ -69,6 +74,7 @@ export default function ManagerApprovedReportsPage() {
           type: 'expense' as const,
           report_date: r.report_date,
           reviewed_at: r.reviewed_at,
+          reviewed_by_name: r.reviewer?.full_name || 'BDM',
           notes: r.notes,
         })),
       ]
@@ -104,6 +110,12 @@ export default function ManagerApprovedReportsPage() {
     }
   }
 
+  const handleViewReport = (report: ApprovedReport) => {
+    // You can create a dedicated view page or use a modal
+    // For now, navigate to a view page (you'll need to create this)
+    router.push(`/manager/reports/view/${report.type}/${report.id}`)
+  }
+
   if (loading) {
     return (
       <div className="p-8">
@@ -128,7 +140,11 @@ export default function ManagerApprovedReportsPage() {
       ) : (
         <div className="space-y-4">
           {reports.map((report) => (
-            <div key={report.id} className="card hover:shadow-md transition-shadow">
+            <div 
+              key={report.id} 
+              className="card hover:shadow-lg transition-all cursor-pointer border-l-4 border-green-500"
+              onClick={() => handleViewReport(report)}
+            >
               <div className="flex items-start justify-between">
                 <div className="flex items-start space-x-4 flex-1">
                   <div className="mt-1">
@@ -142,14 +158,18 @@ export default function ManagerApprovedReportsPage() {
                       <span className="status-badge status-approved">Approved</span>
                     </div>
                     
-                    <div className="flex items-center space-x-4 text-sm text-gray-600">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm text-gray-600">
                       <div className="flex items-center space-x-2">
                         <Calendar className="w-4 h-4" />
-                        <span>Report Date: {format(new Date(report.report_date), 'MMM dd, yyyy')}</span>
+                        <span>Report: {format(new Date(report.report_date), 'MMM dd, yyyy')}</span>
                       </div>
                       <div className="flex items-center space-x-2">
-                        <CheckCircle className="w-4 h-4" />
+                        <CheckCircle className="w-4 h-4 text-green-600" />
                         <span>Approved: {format(new Date(report.reviewed_at), 'MMM dd, yyyy')}</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <User className="w-4 h-4" />
+                        <span>By: {report.reviewed_by_name}</span>
                       </div>
                     </div>
 
@@ -166,6 +186,10 @@ export default function ManagerApprovedReportsPage() {
                     )}
                   </div>
                 </div>
+                <button className="btn-primary flex items-center space-x-2 flex-shrink-0">
+                  <Eye className="w-4 h-4" />
+                  <span>View Details</span>
+                </button>
               </div>
             </div>
           ))}

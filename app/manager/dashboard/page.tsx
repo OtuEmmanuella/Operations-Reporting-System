@@ -11,40 +11,47 @@ interface ReportStats {
   pending: number
   approved: number
   rejected: number
+  clarification_requested: number
 }
 
 interface RecentReport {
   id: string
   type: 'stock' | 'sales' | 'expense'
   date: string
-  status: 'pending' | 'approved' | 'rejected'
+  status: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
   created_at: string
 }
 
 interface StockReportData {
   id: string
   report_date: string
-  status: 'pending' | 'approved' | 'rejected'
+  status: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
   created_at: string
 }
 
 interface SalesReportData {
   id: string
   report_date: string
-  status: 'pending' | 'approved' | 'rejected'
+  status: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
   created_at: string
 }
 
 interface ExpenseReportData {
   id: string
   report_date: string
-  status: 'pending' | 'approved' | 'rejected'
+  status: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
   created_at: string
 }
 
 export default function ManagerDashboard() {
   const [loading, setLoading] = useState(true)
-  const [stats, setStats] = useState<ReportStats>({ total: 0, pending: 0, approved: 0, rejected: 0 })
+  const [stats, setStats] = useState<ReportStats>({ 
+    total: 0, 
+    pending: 0, 
+    approved: 0, 
+    rejected: 0,
+    clarification_requested: 0
+  })
   const [recentReports, setRecentReports] = useState<RecentReport[]>([])
 
   useEffect(() => {
@@ -75,6 +82,7 @@ export default function ManagerDashboard() {
         pending: allReports.filter(r => r.status === 'pending').length,
         approved: allReports.filter(r => r.status === 'approved').length,
         rejected: allReports.filter(r => r.status === 'rejected').length,
+        clarification_requested: allReports.filter(r => r.status === 'clarification_requested').length,
       }
 
       // Get recent reports (last 5)
@@ -130,6 +138,10 @@ export default function ManagerDashboard() {
         return <CheckCircle className="w-4 h-4" />
       case 'rejected':
         return <XCircle className="w-4 h-4" />
+      case 'clarification_requested':
+        return <Clock className="w-4 h-4" />
+      default:
+        return null
     }
   }
 
@@ -141,6 +153,17 @@ export default function ManagerDashboard() {
         return 'Sales Report'
       case 'expense':
         return 'Expense Report'
+      default:
+        return 'Report'
+    }
+  }
+
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case 'clarification_requested':
+        return 'Needs Clarification'
+      default:
+        return status.charAt(0).toUpperCase() + status.slice(1)
     }
   }
 
@@ -167,7 +190,14 @@ export default function ManagerDashboard() {
         </div>
         <div className="card">
           <div className="text-sm font-medium text-gray-600">Pending</div>
-          <div className="text-3xl font-bold text-warning mt-2">{stats.pending}</div>
+          <div className="text-3xl font-bold text-warning mt-2">
+            {stats.pending + stats.clarification_requested}
+          </div>
+          {stats.clarification_requested > 0 && (
+            <div className="text-xs text-orange-600 mt-1">
+              {stats.clarification_requested} need{stats.clarification_requested === 1 ? 's' : ''} clarification
+            </div>
+          )}
         </div>
         <div className="card">
           <div className="text-sm font-medium text-gray-600">Approved</div>
@@ -209,20 +239,26 @@ export default function ManagerDashboard() {
           ) : (
             <div className="space-y-4">
               {recentReports.map((report) => (
-                <div key={report.id} className="flex items-center justify-between pb-4 border-b border-gray-200 last:border-0 last:pb-0">
-                  <div className="flex-1">
-                    <div className="font-medium text-gray-900">{getReportTypeLabel(report.type)}</div>
-                    <div className="text-sm text-gray-600 mt-1">
-                      {format(new Date(report.date), 'MMM dd, yyyy')} • Submitted {format(new Date(report.created_at), 'MMM dd, yyyy')}
+                <Link 
+                  key={report.id} 
+                  href={`/manager/reports/view/${report.type}/${report.id}`}
+                  className="block"
+                >
+                  <div className="flex items-center justify-between pb-4 border-b border-gray-200 last:border-0 last:pb-0 hover:bg-gray-50 -mx-2 px-2 py-2 rounded transition-colors">
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900">{getReportTypeLabel(report.type)}</div>
+                      <div className="text-sm text-gray-600 mt-1">
+                        {format(new Date(report.date), 'MMM dd, yyyy')} • Submitted {format(new Date(report.created_at), 'MMM dd, yyyy')}
+                      </div>
+                    </div>
+                    <div>
+                      <span className={`status-badge status-${report.status}`}>
+                        <span className="mr-1">{getStatusIcon(report.status)}</span>
+                        {getStatusLabel(report.status)}
+                      </span>
                     </div>
                   </div>
-                  <div>
-                    <span className={`status-badge status-${report.status}`}>
-                      <span className="mr-1">{getStatusIcon(report.status)}</span>
-                      {report.status.charAt(0).toUpperCase() + report.status.slice(1)}
-                    </span>
-                  </div>
-                </div>
+                </Link>
               ))}
             </div>
           )}

@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import type { Database } from '@/lib/supabase'
-import { CheckCircle, User, ChevronDown, ChevronUp, Package, DollarSign, FileText, Calendar } from 'lucide-react'
+import { CheckCircle, User, ChevronDown, ChevronUp, Package, DollarSign, FileText, Calendar, Eye } from 'lucide-react'
 import { format } from 'date-fns'
 
 type StockReport = Database['public']['Tables']['stock_reports']['Row']
@@ -26,6 +27,7 @@ interface ApprovedReport {
 }
 
 export default function ApprovedReportsPage() {
+  const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [managers, setManagers] = useState<Manager[]>([])
   const [selectedManager, setSelectedManager] = useState<string | null>(null)
@@ -46,7 +48,6 @@ export default function ApprovedReportsPage() {
 
   const loadManagers = async () => {
     try {
-      // First, get all managers
       const { data: allManagers, error: managersError } = await supabase
         .from('users')
         .select('id, full_name, email')
@@ -58,16 +59,12 @@ export default function ApprovedReportsPage() {
         return
       }
 
-      console.log('All managers:', allManagers)
-
       if (!allManagers || allManagers.length === 0) {
-        console.log('No managers found in database')
         setManagers([])
         setLoading(false)
         return
       }
 
-      // Filter managers who have at least one approved report
       const managersWithReports: Manager[] = []
       
       for (const manager of allManagers) {
@@ -96,7 +93,6 @@ export default function ApprovedReportsPage() {
         }
       }
 
-      console.log('Managers with approved reports:', managersWithReports)
       setManagers(managersWithReports)
     } catch (error) {
       console.error('Error loading managers:', error)
@@ -107,8 +103,6 @@ export default function ApprovedReportsPage() {
 
   const loadManagerReports = async (managerId: string) => {
     try {
-      console.log('Loading reports for manager:', managerId)
-      
       const [stockData, salesData, expenseData] = await Promise.all([
         supabase
           .from('stock_reports')
@@ -129,10 +123,6 @@ export default function ApprovedReportsPage() {
           .eq('status', 'approved')
           .order('reviewed_at', { ascending: false }),
       ])
-
-      console.log('Stock reports:', stockData.data)
-      console.log('Sales reports:', salesData.data)
-      console.log('Expense reports:', expenseData.data)
 
       const allReports: ApprovedReport[] = [
         ...(stockData.data || []).map((r: StockReport) => ({
@@ -155,13 +145,11 @@ export default function ApprovedReportsPage() {
           type: 'expense' as const,
           report_date: r.report_date,
           approved_at: r.reviewed_at || '',
-          total_amount: r.total_amount || undefined,
           notes: r.notes || undefined,
         })),
       ]
 
       allReports.sort((a, b) => new Date(b.approved_at).getTime() - new Date(a.approved_at).getTime())
-      console.log('All approved reports:', allReports)
       setReports(allReports)
     } catch (error) {
       console.error('Error loading reports:', error)
@@ -188,6 +176,10 @@ export default function ApprovedReportsPage() {
       case 'expense':
         return 'Expense Report'
     }
+  }
+
+  const handleViewReport = (report: ApprovedReport) => {
+    router.push(`/bdm/review/${report.type}/${report.id}`)
   }
 
   if (loading) {
@@ -272,7 +264,11 @@ export default function ApprovedReportsPage() {
           ) : (
             <div className="space-y-4">
               {reports.map((report) => (
-                <div key={report.id} className="card">
+                <div 
+                  key={report.id} 
+                  className="card hover:shadow-lg transition-all cursor-pointer border-l-4 border-green-500"
+                  onClick={() => handleViewReport(report)}
+                >
                   <div className="flex items-start justify-between">
                     <div className="flex items-start space-x-4 flex-1">
                       <div className="mt-1">
@@ -309,6 +305,10 @@ export default function ApprovedReportsPage() {
                         )}
                       </div>
                     </div>
+                    <button className="btn-primary flex items-center space-x-2">
+                      <Eye className="w-4 h-4" />
+                      <span>View</span>
+                    </button>
                   </div>
                 </div>
               ))}

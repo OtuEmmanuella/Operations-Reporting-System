@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Package, DollarSign, FileText, Clock, CheckCircle, Users } from 'lucide-react'
+import { Package, DollarSign, FileText, Clock, CheckCircle, Users, AlertTriangle } from 'lucide-react'
 import { format } from 'date-fns'
 import Link from 'next/link'
 
@@ -10,8 +10,9 @@ interface Report {
   id: string
   type: 'stock' | 'sales' | 'expense'
   manager_name: string
+  manager_id: string
   date: string
-  status: 'pending' | 'approved' | 'rejected'
+  status: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
   created_at: string
   amount?: number
 }
@@ -21,12 +22,28 @@ interface Stats {
   sales: number
   expense: number
   total_pending: number
+  clarification_requested: number
+  missing_managers: number
+}
+
+interface Manager {
+  id: string
+  full_name: string
+  email: string
 }
 
 export default function BDMDashboard() {
   const [loading, setLoading] = useState(true)
-  const [stats, setStats] = useState<Stats>({ stock: 0, sales: 0, expense: 0, total_pending: 0 })
+  const [stats, setStats] = useState<Stats>({ 
+    stock: 0, 
+    sales: 0, 
+    expense: 0, 
+    total_pending: 0,
+    clarification_requested: 0,
+    missing_managers: 0
+  })
   const [recentReports, setRecentReports] = useState<Report[]>([])
+  const [missingManagers, setMissingManagers] = useState<Manager[]>([])
 
   useEffect(() => {
     loadDashboardData()
@@ -65,6 +82,13 @@ export default function BDMDashboard() {
       // Get today's date
       const today = new Date().toISOString().split('T')[0]
 
+      // Fetch all managers
+      const { data: allManagers } = await supabase
+        .from('users')
+        .select('id, full_name, email')
+        .eq('role', 'manager')
+        .order('full_name')
+
       // Fetch reports with user information
       const [stockData, salesData, expenseData] = await Promise.all([
         supabase
@@ -90,6 +114,7 @@ export default function BDMDashboard() {
           id: r.id,
           type: 'stock' as const,
           manager_name: r.users?.full_name || 'Unknown',
+          manager_id: r.manager_id,
           date: r.report_date,
           status: r.status,
           created_at: r.created_at,
@@ -98,6 +123,7 @@ export default function BDMDashboard() {
           id: r.id,
           type: 'sales' as const,
           manager_name: r.users?.full_name || 'Unknown',
+          manager_id: r.manager_id,
           date: r.report_date,
           status: r.status,
           created_at: r.created_at,
@@ -107,15 +133,21 @@ export default function BDMDashboard() {
           id: r.id,
           type: 'expense' as const,
           manager_name: r.users?.full_name || 'Unknown',
+          manager_id: r.manager_id,
           date: r.report_date,
           status: r.status,
           created_at: r.created_at,
-          amount: r.total_amount,
         })),
       ]
 
       // Sort by created_at
       allReports.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+      // Find managers who haven't submitted any reports today
+      const managersWithReports = new Set(allReports.map((r: any) => r.manager_id))
+      const managersWithoutReports = (allManagers || []).filter(
+        manager => !managersWithReports.has(manager.id)
+      )
 
       // Calculate stats
       const newStats = {
@@ -123,10 +155,13 @@ export default function BDMDashboard() {
         sales: salesData.data?.length || 0,
         expense: expenseData.data?.length || 0,
         total_pending: allReports.filter(r => r.status === 'pending').length,
+        clarification_requested: allReports.filter(r => r.status === 'clarification_requested').length,
+        missing_managers: managersWithoutReports.length,
       }
 
       setStats(newStats)
       setRecentReports(allReports)
+      setMissingManagers(managersWithoutReports)
     } catch (error) {
       console.error('Error loading dashboard:', error)
     } finally {
@@ -183,7 +218,7 @@ export default function BDMDashboard() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
         <div className="card">
           <div className="flex items-center justify-between">
             <div>
@@ -228,7 +263,61 @@ export default function BDMDashboard() {
             </div>
           </div>
         </div>
+        <div className="card bg-orange-50 border-orange-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium text-orange-600">Missing Reports</div>
+              <div className="text-3xl font-bold text-orange-600 mt-2">{stats.missing_managers}</div>
+            </div>
+            <div className="w-12 h-12 bg-orange-500 rounded-lg flex items-center justify-center">
+              <AlertTriangle className="w-6 h-6 text-white" />
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* Missing Reports Warning */}
+      {missingManagers.length > 0 && (
+        <div className="mb-8 card bg-orange-50 border-orange-200">
+          <div className="flex items-start space-x-3">
+            <AlertTriangle className="w-5 h-5 text-orange-600 mt-0.5" />
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-orange-900 mb-2">
+                {missingManagers.length} Manager{missingManagers.length > 1 ? 's' : ''} Haven't Submitted Today
+              </h3>
+              <div className="space-y-1">
+                {missingManagers.map(manager => (
+                  <div key={manager.id} className="flex items-center space-x-2 text-sm text-orange-800">
+                    <Users className="w-4 h-4" />
+                    <span className="font-medium">{manager.full_name}</span>
+                    <span className="text-orange-600">({manager.email})</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clarification Requests */}
+      {stats.clarification_requested > 0 && (
+        <div className="mb-8 card bg-blue-50 border-blue-200">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <Clock className="w-5 h-5 text-blue-600" />
+              <div>
+                <h3 className="text-lg font-semibold text-blue-900">
+                  {stats.clarification_requested} Report{stats.clarification_requested > 1 ? 's' : ''} Awaiting Clarification
+                </h3>
+                <p className="text-sm text-blue-700">Managers are responding to your questions</p>
+              </div>
+            </div>
+            <Link href="/bdm/pending" className="btn-primary">
+              View All
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* Live Reports Feed */}
       <div>
@@ -268,6 +357,12 @@ export default function BDMDashboard() {
                             <span className="text-xs font-medium text-warning">NEW</span>
                           </>
                         )}
+                        {report.status === 'clarification_requested' && (
+                          <>
+                            <span className="text-gray-400">•</span>
+                            <span className="text-xs font-medium text-blue-600">CLARIFICATION</span>
+                          </>
+                        )}
                       </div>
                       <div className="text-sm text-gray-600 mt-1">
                         {format(new Date(report.created_at), 'h:mm a')} • {format(new Date(report.date), 'MMM dd, yyyy')}
@@ -277,7 +372,9 @@ export default function BDMDashboard() {
                   </div>
                   <div>
                     <span className={`status-badge status-${report.status}`}>
-                      {report.status.charAt(0).toUpperCase() + report.status.slice(1)}
+                      {report.status === 'clarification_requested' 
+                        ? 'Clarification' 
+                        : report.status.charAt(0).toUpperCase() + report.status.slice(1)}
                     </span>
                   </div>
                 </div>

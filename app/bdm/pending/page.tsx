@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { Package, DollarSign, FileText, Clock, User, Calendar } from 'lucide-react'
+import { Package, DollarSign, FileText, Clock, User, Calendar, AlertCircle } from 'lucide-react'
 import { format } from 'date-fns'
 
 interface PendingReport {
@@ -13,14 +13,19 @@ interface PendingReport {
   manager_name: string
   report_date: string
   created_at: string
+  status: 'pending' | 'clarification_requested'
   total_amount?: number
   notes?: string
+  clarification_request?: string
+  clarification_response?: string
+  clarification_responded_at?: string
 }
 
 export default function PendingReportsPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [reports, setReports] = useState<PendingReport[]>([])
+  const [filter, setFilter] = useState<'all' | 'pending' | 'clarification'>('all')
 
   useEffect(() => {
     loadPendingReports()
@@ -32,17 +37,17 @@ export default function PendingReportsPage() {
         supabase
           .from('stock_reports')
           .select('*, users!stock_reports_manager_id_fkey(full_name)')
-          .eq('status', 'pending')
+          .in('status', ['pending', 'clarification_requested'])
           .order('created_at', { ascending: false }),
         supabase
           .from('sales_reports')
           .select('*, users!sales_reports_manager_id_fkey(full_name)')
-          .eq('status', 'pending')
+          .in('status', ['pending', 'clarification_requested'])
           .order('created_at', { ascending: false }),
         supabase
           .from('expense_reports')
           .select('*, users!expense_reports_manager_id_fkey(full_name)')
-          .eq('status', 'pending')
+          .in('status', ['pending', 'clarification_requested'])
           .order('created_at', { ascending: false }),
       ])
 
@@ -54,7 +59,11 @@ export default function PendingReportsPage() {
           manager_name: r.users?.full_name || 'Unknown',
           report_date: r.report_date,
           created_at: r.created_at,
+          status: r.status,
           notes: r.notes,
+          clarification_request: r.clarification_request,
+          clarification_response: r.clarification_response,
+          clarification_responded_at: r.clarification_responded_at,
         })),
         ...(salesData.data || []).map((r: any) => ({
           id: r.id,
@@ -63,8 +72,12 @@ export default function PendingReportsPage() {
           manager_name: r.users?.full_name || 'Unknown',
           report_date: r.report_date,
           created_at: r.created_at,
+          status: r.status,
           total_amount: r.total_amount,
           notes: r.notes,
+          clarification_request: r.clarification_request,
+          clarification_response: r.clarification_response,
+          clarification_responded_at: r.clarification_responded_at,
         })),
         ...(expenseData.data || []).map((r: any) => ({
           id: r.id,
@@ -73,8 +86,11 @@ export default function PendingReportsPage() {
           manager_name: r.users?.full_name || 'Unknown',
           report_date: r.report_date,
           created_at: r.created_at,
-          total_amount: r.total_amount,
+          status: r.status,
           notes: r.notes,
+          clarification_request: r.clarification_request,
+          clarification_response: r.clarification_response,
+          clarification_responded_at: r.clarification_responded_at,
         })),
       ]
 
@@ -86,6 +102,15 @@ export default function PendingReportsPage() {
       setLoading(false)
     }
   }
+
+  const filteredReports = reports.filter(report => {
+    if (filter === 'pending') return report.status === 'pending'
+    if (filter === 'clarification') return report.status === 'clarification_requested'
+    return true
+  })
+
+  const pendingCount = reports.filter(r => r.status === 'pending').length
+  const clarificationCount = reports.filter(r => r.status === 'clarification_requested').length
 
   const getReportIcon = (type: string) => {
     switch (type) {
@@ -139,18 +164,60 @@ export default function PendingReportsPage() {
         <p className="text-gray-600 mt-2">Review and approve or reject manager submissions</p>
       </div>
 
-      {reports.length === 0 ? (
+      {/* Filter Buttons */}
+      <div className="flex space-x-4 mb-6">
+        <button
+          onClick={() => setFilter('all')}
+          className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+            filter === 'all'
+              ? 'bg-primary text-white'
+              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+          }`}
+        >
+          All ({reports.length})
+        </button>
+        <button
+          onClick={() => setFilter('pending')}
+          className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+            filter === 'pending'
+              ? 'bg-yellow-600 text-white'
+              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+          }`}
+        >
+          Pending Review ({pendingCount})
+        </button>
+        <button
+          onClick={() => setFilter('clarification')}
+          className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+            filter === 'clarification'
+              ? 'bg-orange-600 text-white'
+              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+          }`}
+        >
+          Awaiting Clarification ({clarificationCount})
+        </button>
+      </div>
+
+      {filteredReports.length === 0 ? (
         <div className="card text-center py-12">
           <Clock className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Pending Reports</h3>
-          <p className="text-gray-600">All reports have been reviewed</p>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Reports</h3>
+          <p className="text-gray-600">
+            {filter === 'all' && 'All reports have been reviewed'}
+            {filter === 'pending' && 'No pending reports to review'}
+            {filter === 'clarification' && 'No reports awaiting clarification'}
+          </p>
         </div>
       ) : (
         <div className="space-y-4">
-          {reports.map((report) => (
+          {filteredReports.map((report) => (
             <div
               key={report.id}
-              className={`card border-l-4 ${getReportColor(report.type)} hover:shadow-md transition-shadow cursor-pointer`}
+              className={`card border-l-4 ${
+                report.status === 'clarification_requested' 
+                  ? 'border-orange-500 bg-orange-50' 
+                  : getReportColor(report.type)
+              } hover:shadow-md transition-shadow cursor-pointer`}
               onClick={() => handleReviewReport(report)}
             >
               <div className="flex items-start justify-between">
@@ -163,10 +230,14 @@ export default function PendingReportsPage() {
                       <h3 className="text-lg font-semibold text-gray-900">
                         {getReportTypeLabel(report.type)}
                       </h3>
-                      <span className="status-badge status-pending">Pending Review</span>
+                      <span className={`status-badge status-${report.status}`}>
+                        {report.status === 'clarification_requested' 
+                          ? 'Clarification Requested' 
+                          : 'Pending Review'}
+                      </span>
                     </div>
                     
-                    <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div className="grid grid-cols-2 gap-4 text-sm mb-3">
                       <div className="flex items-center space-x-2 text-gray-600">
                         <User className="w-4 h-4" />
                         <span>{report.manager_name}</span>
@@ -186,7 +257,43 @@ export default function PendingReportsPage() {
                       )}
                     </div>
 
-                    {report.notes && (
+                    {/* Show clarification info if status is clarification_requested */}
+                    {report.status === 'clarification_requested' && (
+                      <div className="mt-3 space-y-2">
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                          <div className="flex items-start space-x-2">
+                            <AlertCircle className="w-4 h-4 text-blue-600 mt-0.5" />
+                            <div className="flex-1">
+                              <div className="text-sm font-semibold text-blue-900 mb-1">Your Question:</div>
+                              <div className="text-sm text-blue-800">{report.clarification_request}</div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {report.clarification_response ? (
+                          <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                            <div className="flex items-start space-x-2">
+                              <AlertCircle className="w-4 h-4 text-green-600 mt-0.5" />
+                              <div className="flex-1">
+                                <div className="text-sm font-semibold text-green-900 mb-1">
+                                  Manager's Response ({report.clarification_responded_at && format(new Date(report.clarification_responded_at), 'MMM dd, h:mm a')}):
+                                </div>
+                                <div className="text-sm text-green-800">{report.clarification_response}</div>
+                                <div className="mt-2 text-xs text-green-700">
+                                  ✓ Click to review and approve/reject
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-sm text-orange-600 font-medium">
+                            ⏳ Waiting for manager's response...
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {report.notes && report.status === 'pending' && (
                       <div className="mt-3 text-sm text-gray-600 bg-gray-50 p-3 rounded">
                         <span className="font-medium">Notes:</span> {report.notes}
                       </div>
@@ -200,7 +307,9 @@ export default function PendingReportsPage() {
                   }}
                   className="btn-primary ml-4"
                 >
-                  Review
+                  {report.status === 'clarification_requested' && report.clarification_response 
+                    ? 'Review Response' 
+                    : 'Review'}
                 </button>
               </div>
             </div>

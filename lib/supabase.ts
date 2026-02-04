@@ -1,4 +1,15 @@
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { createBrowserClient } from '@supabase/ssr'
+
+// Clarification thread message type
+export interface ClarificationMessage {
+  id: string
+  type: 'question' | 'response'
+  author_id: string
+  author_name: string
+  author_role: 'bdm' | 'manager'
+  content: string
+  timestamp: string
+}
 
 export type Database = {
   public: {
@@ -37,12 +48,16 @@ export type Database = {
           id: string
           manager_id: string
           report_date: string
-          status: 'pending' | 'approved' | 'rejected'
+          status: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
           notes: string | null
           created_at: string
           updated_at: string
           rejection_reason: string | null
           rejection_feedback: string | null
+          clarification_request: string | null
+          clarification_response: string | null
+          clarification_responded_at: string | null
+          clarification_thread: ClarificationMessage[] | null
           resubmission_deadline: string | null
           reviewed_by: string | null
           reviewed_at: string | null
@@ -51,12 +66,16 @@ export type Database = {
           id?: string
           manager_id: string
           report_date: string
-          status?: 'pending' | 'approved' | 'rejected'
+          status?: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
           notes?: string | null
           created_at?: string
           updated_at?: string
           rejection_reason?: string | null
           rejection_feedback?: string | null
+          clarification_request?: string | null
+          clarification_response?: string | null
+          clarification_responded_at?: string | null
+          clarification_thread?: ClarificationMessage[] | null
           resubmission_deadline?: string | null
           reviewed_by?: string | null
           reviewed_at?: string | null
@@ -65,12 +84,16 @@ export type Database = {
           id?: string
           manager_id?: string
           report_date?: string
-          status?: 'pending' | 'approved' | 'rejected'
+          status?: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
           notes?: string | null
           created_at?: string
           updated_at?: string
           rejection_reason?: string | null
           rejection_feedback?: string | null
+          clarification_request?: string | null
+          clarification_response?: string | null
+          clarification_responded_at?: string | null
+          clarification_thread?: ClarificationMessage[] | null
           resubmission_deadline?: string | null
           reviewed_by?: string | null
           reviewed_at?: string | null
@@ -105,12 +128,16 @@ export type Database = {
           manager_id: string
           report_date: string
           total_amount: number
-          status: 'pending' | 'approved' | 'rejected'
+          status: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
           notes: string | null
           created_at: string
           updated_at: string
           rejection_reason: string | null
           rejection_feedback: string | null
+          clarification_request: string | null
+          clarification_response: string | null
+          clarification_responded_at: string | null
+          clarification_thread: ClarificationMessage[] | null
           resubmission_deadline: string | null
           reviewed_by: string | null
           reviewed_at: string | null
@@ -120,12 +147,16 @@ export type Database = {
           manager_id: string
           report_date: string
           total_amount: number
-          status?: 'pending' | 'approved' | 'rejected'
+          status?: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
           notes?: string | null
           created_at?: string
           updated_at?: string
           rejection_reason?: string | null
           rejection_feedback?: string | null
+          clarification_request?: string | null
+          clarification_response?: string | null
+          clarification_responded_at?: string | null
+          clarification_thread?: ClarificationMessage[] | null
           resubmission_deadline?: string | null
           reviewed_by?: string | null
           reviewed_at?: string | null
@@ -135,12 +166,16 @@ export type Database = {
           manager_id?: string
           report_date?: string
           total_amount?: number
-          status?: 'pending' | 'approved' | 'rejected'
+          status?: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
           notes?: string | null
           created_at?: string
           updated_at?: string
           rejection_reason?: string | null
           rejection_feedback?: string | null
+          clarification_request?: string | null
+          clarification_response?: string | null
+          clarification_responded_at?: string | null
+          clarification_thread?: ClarificationMessage[] | null
           resubmission_deadline?: string | null
           reviewed_by?: string | null
           reviewed_at?: string | null
@@ -177,12 +212,16 @@ export type Database = {
           id: string
           manager_id: string
           report_date: string
-          status: 'pending' | 'approved' | 'rejected'
+          status: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
           notes: string | null
           created_at: string
           updated_at: string
           rejection_reason: string | null
           rejection_feedback: string | null
+          clarification_request: string | null
+          clarification_response: string | null
+          clarification_responded_at: string | null
+          clarification_thread: ClarificationMessage[] | null
           resubmission_deadline: string | null
           reviewed_by: string | null
           reviewed_at: string | null
@@ -191,12 +230,16 @@ export type Database = {
           id?: string
           manager_id: string
           report_date: string
-          status?: 'pending' | 'approved' | 'rejected'
+          status?: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
           notes?: string | null
           created_at?: string
           updated_at?: string
           rejection_reason?: string | null
           rejection_feedback?: string | null
+          clarification_request?: string | null
+          clarification_response?: string | null
+          clarification_responded_at?: string | null
+          clarification_thread?: ClarificationMessage[] | null
           resubmission_deadline?: string | null
           reviewed_by?: string | null
           reviewed_at?: string | null
@@ -205,12 +248,16 @@ export type Database = {
           id?: string
           manager_id?: string
           report_date?: string
-          status?: 'pending' | 'approved' | 'rejected'
+          status?: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
           notes?: string | null
           created_at?: string
           updated_at?: string
           rejection_reason?: string | null
           rejection_feedback?: string | null
+          clarification_request?: string | null
+          clarification_response?: string | null
+          clarification_responded_at?: string | null
+          clarification_thread?: ClarificationMessage[] | null
           resubmission_deadline?: string | null
           reviewed_by?: string | null
           reviewed_at?: string | null
@@ -240,4 +287,7 @@ export type Database = {
   }
 }
 
-export const supabase = createClientComponentClient<Database>()
+export const supabase = createBrowserClient<Database>(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
