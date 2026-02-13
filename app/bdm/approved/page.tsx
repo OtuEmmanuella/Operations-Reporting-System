@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import type { Database } from '@/lib/supabase'
-import { CheckCircle, User, ChevronDown, ChevronUp, Package, DollarSign, FileText, Calendar, Eye } from 'lucide-react'
+import { CheckCircle, User, ChevronDown, ChevronUp, Package, DollarSign, FileText, Calendar, Eye, Hotel, UserCheck, TrendingUp, MessageSquare } from 'lucide-react'
 import { format } from 'date-fns'
 
 type StockReport = Database['public']['Tables']['stock_reports']['Row']
@@ -15,11 +15,12 @@ interface Manager {
   id: string
   full_name: string
   email: string
+  role: 'manager' | 'front_office_manager'
 }
 
 interface ApprovedReport {
   id: string
-  type: 'stock' | 'sales' | 'expense'
+  type: 'stock' | 'sales' | 'expense' | 'occupancy' | 'guest_activity' | 'revenue' | 'complaint'
   report_date: string
   approved_at: string
   total_amount?: number
@@ -48,10 +49,11 @@ export default function ApprovedReportsPage() {
 
   const loadManagers = async () => {
     try {
+      // Get both manager types
       const { data: allManagers, error: managersError } = await supabase
         .from('users')
-        .select('id, full_name, email')
-        .eq('role', 'manager')
+        .select('id, full_name, email, role')
+        .in('role', ['manager', 'front_office_manager'])
         .order('full_name')
 
       if (managersError) {
@@ -68,28 +70,55 @@ export default function ApprovedReportsPage() {
       const managersWithReports: Manager[] = []
       
       for (const manager of allManagers) {
-        const [stockCount, salesCount, expenseCount] = await Promise.all([
-          supabase
-            .from('stock_reports')
-            .select('id', { count: 'exact', head: true })
-            .eq('manager_id', manager.id)
-            .eq('status', 'approved'),
-          supabase
-            .from('sales_reports')
-            .select('id', { count: 'exact', head: true })
-            .eq('manager_id', manager.id)
-            .eq('status', 'approved'),
-          supabase
-            .from('expense_reports')
-            .select('id', { count: 'exact', head: true })
-            .eq('manager_id', manager.id)
-            .eq('status', 'approved'),
-        ])
+        let totalApproved = 0
 
-        const totalApproved = (stockCount.count || 0) + (salesCount.count || 0) + (expenseCount.count || 0)
+        if (manager.role === 'manager') {
+          const [stockCount, salesCount, expenseCount] = await Promise.all([
+            supabase
+              .from('stock_reports')
+              .select('id', { count: 'exact', head: true })
+              .eq('manager_id', manager.id)
+              .eq('status', 'approved'),
+            supabase
+              .from('sales_reports')
+              .select('id', { count: 'exact', head: true })
+              .eq('manager_id', manager.id)
+              .eq('status', 'approved'),
+            supabase
+              .from('expense_reports')
+              .select('id', { count: 'exact', head: true })
+              .eq('manager_id', manager.id)
+              .eq('status', 'approved'),
+          ])
+          totalApproved = (stockCount.count || 0) + (salesCount.count || 0) + (expenseCount.count || 0)
+        } else if (manager.role === 'front_office_manager') {
+          const [occupancyCount, guestCount, revenueCount, complaintCount] = await Promise.all([
+            supabase
+              .from('occupancy_reports')
+              .select('id', { count: 'exact', head: true })
+              .eq('manager_id', manager.id)
+              .eq('status', 'approved'),
+            supabase
+              .from('guest_activity_reports')
+              .select('id', { count: 'exact', head: true })
+              .eq('manager_id', manager.id)
+              .eq('status', 'approved'),
+            supabase
+              .from('revenue_reports')
+              .select('id', { count: 'exact', head: true })
+              .eq('manager_id', manager.id)
+              .eq('status', 'approved'),
+            supabase
+              .from('complaint_reports')
+              .select('id', { count: 'exact', head: true })
+              .eq('manager_id', manager.id)
+              .eq('status', 'approved'),
+          ])
+          totalApproved = (occupancyCount.count || 0) + (guestCount.count || 0) + (revenueCount.count || 0) + (complaintCount.count || 0)
+        }
         
         if (totalApproved > 0) {
-          managersWithReports.push(manager)
+          managersWithReports.push(manager as Manager)
         }
       }
 
@@ -103,51 +132,117 @@ export default function ApprovedReportsPage() {
 
   const loadManagerReports = async (managerId: string) => {
     try {
-      const [stockData, salesData, expenseData] = await Promise.all([
-        supabase
-          .from('stock_reports')
-          .select('*')
-          .eq('manager_id', managerId)
-          .eq('status', 'approved')
-          .order('reviewed_at', { ascending: false }),
-        supabase
-          .from('sales_reports')
-          .select('*')
-          .eq('manager_id', managerId)
-          .eq('status', 'approved')
-          .order('reviewed_at', { ascending: false }),
-        supabase
-          .from('expense_reports')
-          .select('*')
-          .eq('manager_id', managerId)
-          .eq('status', 'approved')
-          .order('reviewed_at', { ascending: false }),
-      ])
+      const manager = managers.find(m => m.id === managerId)
+      if (!manager) return
 
-      const allReports: ApprovedReport[] = [
-        ...(stockData.data || []).map((r: StockReport) => ({
-          id: r.id,
-          type: 'stock' as const,
-          report_date: r.report_date,
-          approved_at: r.reviewed_at || '',
-          notes: r.notes || undefined,
-        })),
-        ...(salesData.data || []).map((r: SalesReport) => ({
-          id: r.id,
-          type: 'sales' as const,
-          report_date: r.report_date,
-          approved_at: r.reviewed_at || '',
-          total_amount: r.total_amount || undefined,
-          notes: r.notes || undefined,
-        })),
-        ...(expenseData.data || []).map((r: ExpenseReport) => ({
-          id: r.id,
-          type: 'expense' as const,
-          report_date: r.report_date,
-          approved_at: r.reviewed_at || '',
-          notes: r.notes || undefined,
-        })),
-      ]
+      let allReports: ApprovedReport[] = []
+
+      if (manager.role === 'manager') {
+        const [stockData, salesData, expenseData] = await Promise.all([
+          supabase
+            .from('stock_reports')
+            .select('*')
+            .eq('manager_id', managerId)
+            .eq('status', 'approved')
+            .order('reviewed_at', { ascending: false }),
+          supabase
+            .from('sales_reports')
+            .select('*')
+            .eq('manager_id', managerId)
+            .eq('status', 'approved')
+            .order('reviewed_at', { ascending: false }),
+          supabase
+            .from('expense_reports')
+            .select('*')
+            .eq('manager_id', managerId)
+            .eq('status', 'approved')
+            .order('reviewed_at', { ascending: false }),
+        ])
+
+        allReports = [
+          ...(stockData.data || []).map((r: StockReport) => ({
+            id: r.id,
+            type: 'stock' as const,
+            report_date: r.report_date,
+            approved_at: r.reviewed_at || '',
+            notes: r.notes || undefined,
+          })),
+          ...(salesData.data || []).map((r: SalesReport) => ({
+            id: r.id,
+            type: 'sales' as const,
+            report_date: r.report_date,
+            approved_at: r.reviewed_at || '',
+            total_amount: r.total_amount || undefined,
+            notes: r.notes || undefined,
+          })),
+          ...(expenseData.data || []).map((r: ExpenseReport) => ({
+            id: r.id,
+            type: 'expense' as const,
+            report_date: r.report_date,
+            approved_at: r.reviewed_at || '',
+            notes: r.notes || undefined,
+          })),
+        ]
+      } else if (manager.role === 'front_office_manager') {
+        const [occupancyData, guestData, revenueData, complaintData] = await Promise.all([
+          supabase
+            .from('occupancy_reports')
+            .select('*')
+            .eq('manager_id', managerId)
+            .eq('status', 'approved')
+            .order('reviewed_at', { ascending: false }),
+          supabase
+            .from('guest_activity_reports')
+            .select('*')
+            .eq('manager_id', managerId)
+            .eq('status', 'approved')
+            .order('reviewed_at', { ascending: false }),
+          supabase
+            .from('revenue_reports')
+            .select('*')
+            .eq('manager_id', managerId)
+            .eq('status', 'approved')
+            .order('reviewed_at', { ascending: false }),
+          supabase
+            .from('complaint_reports')
+            .select('*')
+            .eq('manager_id', managerId)
+            .eq('status', 'approved')
+            .order('reviewed_at', { ascending: false }),
+        ])
+
+        allReports = [
+          ...(occupancyData.data || []).map((r: any) => ({
+            id: r.id,
+            type: 'occupancy' as const,
+            report_date: r.report_date,
+            approved_at: r.reviewed_at || '',
+            notes: r.notes || undefined,
+          })),
+          ...(guestData.data || []).map((r: any) => ({
+            id: r.id,
+            type: 'guest_activity' as const,
+            report_date: r.report_date,
+            approved_at: r.reviewed_at || '',
+            notes: r.notes || undefined,
+          })),
+          ...(revenueData.data || []).map((r: any) => ({
+            id: r.id,
+            type: 'revenue' as const,
+            report_date: r.report_date,
+            approved_at: r.reviewed_at || '',
+            total_amount: r.total_revenue || undefined,
+            notes: r.notes || undefined,
+          })),
+          ...(complaintData.data || []).map((r: any) => ({
+            id: r.id,
+            type: 'complaint' as const,
+            report_date: r.report_date,
+            approved_at: r.reviewed_at || '',
+            notes: r.notes || undefined,
+          })),
+        ]
+      }
 
       allReports.sort((a, b) => new Date(b.approved_at).getTime() - new Date(a.approved_at).getTime())
       setReports(allReports)
@@ -164,6 +259,14 @@ export default function ApprovedReportsPage() {
         return <DollarSign className="w-5 h-5 text-green-500" />
       case 'expense':
         return <FileText className="w-5 h-5 text-purple-500" />
+      case 'occupancy':
+        return <Hotel className="w-5 h-5 text-indigo-500" />
+      case 'guest_activity':
+        return <UserCheck className="w-5 h-5 text-pink-500" />
+      case 'revenue':
+        return <TrendingUp className="w-5 h-5 text-emerald-500" />
+      case 'complaint':
+        return <MessageSquare className="w-5 h-5 text-red-500" />
     }
   }
 
@@ -175,6 +278,14 @@ export default function ApprovedReportsPage() {
         return 'Sales Report'
       case 'expense':
         return 'Expense Report'
+      case 'occupancy':
+        return 'Occupancy Report'
+      case 'guest_activity':
+        return 'Guest Activity Report'
+      case 'revenue':
+        return 'Revenue Report'
+      case 'complaint':
+        return 'Complaint Report'
     }
   }
 
@@ -226,11 +337,11 @@ export default function ApprovedReportsPage() {
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
-                        <User className="w-5 h-5" />
+                        {manager.role === 'front_office_manager' ? <Hotel className="w-5 h-5" /> : <User className="w-5 h-5" />}
                         <div>
                           <div className="font-medium">{manager.full_name}</div>
                           <div className={`text-xs ${selectedManager === manager.id ? 'text-white/80' : 'text-gray-500'}`}>
-                            {manager.email}
+                            {manager.role === 'front_office_manager' ? 'Front Office' : 'Manager'}
                           </div>
                         </div>
                       </div>

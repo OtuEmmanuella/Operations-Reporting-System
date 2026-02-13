@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { supabase, ClarificationMessage } from '@/lib/supabase'
-import { ArrowLeft, CheckCircle, XCircle, Calendar, User, Package, DollarSign, FileText, AlertTriangle, AlertCircle, Send, Clock, MessageCircle } from 'lucide-react'
+import { ArrowLeft, CheckCircle, XCircle, Calendar, User, Package, DollarSign, FileText, AlertTriangle, AlertCircle, Send, Clock, MessageCircle, Hotel, UserCheck, TrendingUp, MessageSquare } from 'lucide-react'
 import { format } from 'date-fns'
 import Link from 'next/link'
 
@@ -27,7 +27,7 @@ interface ReportDetail {
 export default function ManagerViewReportPage() {
   const router = useRouter()
   const params = useParams()
-  const type = params.type as 'stock' | 'sales' | 'expense'
+  const type = params.type as 'stock' | 'sales' | 'expense' | 'occupancy' | 'guest_activity' | 'revenue' | 'complaint'
   const id = params.id as string
 
   const [loading, setLoading] = useState(true)
@@ -42,7 +42,7 @@ export default function ManagerViewReportPage() {
   const loadReportDetail = async () => {
     try {
       let query: any
-      let itemsQuery: any
+      let itemsQuery: any = null
 
       switch (type) {
         case 'stock':
@@ -78,9 +78,40 @@ export default function ManagerViewReportPage() {
             .select('*')
             .eq('report_id', id)
           break
+        case 'occupancy':
+          query = supabase
+            .from('occupancy_reports')
+            .select('*, reviewer:users!occupancy_reports_reviewed_by_fkey(full_name)')
+            .eq('id', id)
+            .single()
+          break
+        case 'guest_activity':
+          query = supabase
+            .from('guest_activity_reports')
+            .select('*, reviewer:users!guest_activity_reports_reviewed_by_fkey(full_name)')
+            .eq('id', id)
+            .single()
+          break
+        case 'revenue':
+          query = supabase
+            .from('revenue_reports')
+            .select('*, reviewer:users!revenue_reports_reviewed_by_fkey(full_name)')
+            .eq('id', id)
+            .single()
+          break
+        case 'complaint':
+          query = supabase
+            .from('complaint_reports')
+            .select('*, reviewer:users!complaint_reports_reviewed_by_fkey(full_name)')
+            .eq('id', id)
+            .single()
+          break
       }
 
-      const [reportData, itemsData] = await Promise.all([query, itemsQuery])
+      const queries = itemsQuery ? [query, itemsQuery] : [query]
+      const results = await Promise.all(queries)
+      const reportData = results[0]
+      const itemsData = results[1] || { data: [] }
 
       if (reportData.data) {
         setReport({
@@ -90,7 +121,7 @@ export default function ManagerViewReportPage() {
           created_at: reportData.data.created_at,
           status: reportData.data.status,
           notes: reportData.data.notes,
-          total_amount: reportData.data.total_amount,
+          total_amount: reportData.data.total_amount || reportData.data.total_revenue,
           reviewed_at: reportData.data.reviewed_at,
           reviewed_by_name: reportData.data.reviewer?.full_name || 'BDM',
           rejection_reason: reportData.data.rejection_reason,
@@ -168,6 +199,14 @@ export default function ManagerViewReportPage() {
         return <DollarSign className="w-6 h-6 text-green-500" />
       case 'expense':
         return <FileText className="w-6 h-6 text-purple-500" />
+      case 'occupancy':
+        return <Hotel className="w-6 h-6 text-indigo-500" />
+      case 'guest_activity':
+        return <UserCheck className="w-6 h-6 text-pink-500" />
+      case 'revenue':
+        return <TrendingUp className="w-6 h-6 text-emerald-500" />
+      case 'complaint':
+        return <MessageSquare className="w-6 h-6 text-red-500" />
     }
   }
 
@@ -179,6 +218,14 @@ export default function ManagerViewReportPage() {
         return 'Sales Report'
       case 'expense':
         return 'Expense Report'
+      case 'occupancy':
+        return 'Occupancy Report'
+      case 'guest_activity':
+        return 'Guest Activity Report'
+      case 'revenue':
+        return 'Revenue Report'
+      case 'complaint':
+        return 'Complaint Report'
     }
   }
 
@@ -195,7 +242,12 @@ export default function ManagerViewReportPage() {
   const needsResponse = () => {
     if (!report?.clarification_thread || report.clarification_thread.length === 0) return false
     const lastMessage = report.clarification_thread[report.clarification_thread.length - 1]
-    return lastMessage.type === 'question'
+    return lastMessage.type === 'question' && report.status === 'clarification_requested'
+  }
+
+  // Has clarification history (show even if approved/rejected)
+  const hasClarificationHistory = () => {
+    return report?.clarification_thread && report.clarification_thread.length > 0
   }
 
   if (loading) {
@@ -238,17 +290,29 @@ export default function ManagerViewReportPage() {
         </div>
       </div>
 
-      {/* Clarification Thread Section */}
-      {report.status === 'clarification_requested' && report.clarification_thread && report.clarification_thread.length > 0 && (
-        <div className="mb-6 card bg-orange-50 border-orange-200">
+      {/* Clarification Thread Section - SHOW FOR ALL STATUSES IF EXISTS */}
+      {hasClarificationHistory() && (
+        <div className={`mb-6 card ${
+          report.status === 'clarification_requested' 
+            ? 'bg-orange-50 border-orange-200' 
+            : 'bg-gray-50 border-gray-200'
+        }`}>
           <div className="flex items-start space-x-3">
-            <MessageCircle className="w-6 h-6 text-orange-600 mt-1" />
+            <MessageCircle className={`w-6 h-6 mt-1 ${
+              report.status === 'clarification_requested' ? 'text-orange-600' : 'text-gray-600'
+            }`} />
             <div className="flex-1">
-              <h3 className="text-lg font-semibold text-orange-900 mb-3">Clarification Conversation</h3>
+              <h3 className={`text-lg font-semibold mb-3 ${
+                report.status === 'clarification_requested' ? 'text-orange-900' : 'text-gray-900'
+              }`}>
+                {report.status === 'clarification_requested' 
+                  ? 'Clarification Conversation' 
+                  : 'Clarification History'}
+              </h3>
               
               {/* Thread of messages */}
               <div className="space-y-3 max-h-96 overflow-y-auto mb-4">
-                {report.clarification_thread.map((message, index) => (
+                {report.clarification_thread!.map((message, index) => (
                   <div
                     key={message.id}
                     className={`rounded-lg p-4 ${
@@ -286,7 +350,7 @@ export default function ManagerViewReportPage() {
                 ))}
               </div>
 
-              {/* Response Input (if last message is a question) */}
+              {/* Response Input (if last message is a question AND status is clarification_requested) */}
               {needsResponse() && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -319,12 +383,41 @@ export default function ManagerViewReportPage() {
                 </div>
               )}
 
-              {/* Already responded indicator */}
-              {!needsResponse() && report.clarification_thread[report.clarification_thread.length - 1].type === 'response' && (
+              {/* Already responded indicator OR Resolved status */}
+              {report.status === 'clarification_requested' && 
+               !needsResponse() && 
+               report.clarification_thread![report.clarification_thread!.length - 1].type === 'response' && (
                 <div className="bg-green-50 border border-green-200 rounded-lg p-3">
                   <div className="flex items-center space-x-2 text-sm text-green-800">
                     <CheckCircle className="w-4 h-4" />
                     <span>Response submitted. Waiting for BDM to review...</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Show resolution status for approved/rejected */}
+              {(report.status === 'approved' || report.status === 'rejected') && hasClarificationHistory() && (
+                <div className={`${
+                  report.status === 'approved' 
+                    ? 'bg-green-50 border border-green-200' 
+                    : 'bg-red-50 border border-red-200'
+                } rounded-lg p-3`}>
+                  <div className="flex items-center space-x-2 text-sm">
+                    {report.status === 'approved' ? (
+                      <>
+                        <CheckCircle className="w-4 h-4 text-green-600" />
+                        <span className="text-green-800 font-medium">
+                          Report was approved after clarification discussion
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="w-4 h-4 text-red-600" />
+                        <span className="text-red-800 font-medium">
+                          Report was rejected after clarification discussion
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -419,7 +512,7 @@ export default function ManagerViewReportPage() {
           </div>
         )}
 
-        {/* Items Table */}
+        {/* Items Table (only for stock, sales, expense) */}
         {report.items && report.items.length > 0 && (
           <div>
             <div className="text-sm font-medium text-gray-700 mb-2">Items:</div>

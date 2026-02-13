@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Users, User, Mail, Briefcase, Building2 } from 'lucide-react'
+import { Users, User, Mail, Briefcase, Building2, Hotel } from 'lucide-react'
 
 interface Manager {
   id: string
   full_name: string
   email: string
+  role: 'manager' | 'front_office_manager'
   position: string | null
   department: string | null
   created_at: string
@@ -35,10 +36,11 @@ export default function ManagersPage() {
 
   const loadManagers = async () => {
     try {
+      // Get both manager and front_office_manager roles
       const { data, error } = await supabase
         .from('users')
-        .select('id, full_name, email, position, department, created_at')
-        .eq('role', 'manager')
+        .select('id, full_name, email, role, position, department, created_at')
+        .in('role', ['manager', 'front_office_manager'])
         .order('full_name')
 
       if (error) throw error
@@ -51,17 +53,37 @@ export default function ManagersPage() {
         const statsMap = new Map<string, ManagerStats>()
         
         for (const manager of managersData) {
-          const [stockData, salesData, expenseData] = await Promise.all([
-            supabase.from('stock_reports').select('status').eq('manager_id', manager.id),
-            supabase.from('sales_reports').select('status').eq('manager_id', manager.id),
-            supabase.from('expense_reports').select('status').eq('manager_id', manager.id),
-          ])
+          let allReports: ReportStatus[] = []
 
-          const allReports: ReportStatus[] = [
-            ...(stockData.data || []) as ReportStatus[],
-            ...(salesData.data || []) as ReportStatus[],
-            ...(expenseData.data || []) as ReportStatus[],
-          ]
+          if (manager.role === 'manager') {
+            // Regular manager - stock, sales, expense reports
+            const [stockData, salesData, expenseData] = await Promise.all([
+              supabase.from('stock_reports').select('status').eq('manager_id', manager.id),
+              supabase.from('sales_reports').select('status').eq('manager_id', manager.id),
+              supabase.from('expense_reports').select('status').eq('manager_id', manager.id),
+            ])
+
+            allReports = [
+              ...(stockData.data || []) as ReportStatus[],
+              ...(salesData.data || []) as ReportStatus[],
+              ...(expenseData.data || []) as ReportStatus[],
+            ]
+          } else if (manager.role === 'front_office_manager') {
+            // Front office manager - occupancy, guest_activity, revenue, complaint reports
+            const [occupancyData, guestData, revenueData, complaintData] = await Promise.all([
+              supabase.from('occupancy_reports').select('status').eq('manager_id', manager.id),
+              supabase.from('guest_activity_reports').select('status').eq('manager_id', manager.id),
+              supabase.from('revenue_reports').select('status').eq('manager_id', manager.id),
+              supabase.from('complaint_reports').select('status').eq('manager_id', manager.id),
+            ])
+
+            allReports = [
+              ...(occupancyData.data || []) as ReportStatus[],
+              ...(guestData.data || []) as ReportStatus[],
+              ...(revenueData.data || []) as ReportStatus[],
+              ...(complaintData.data || []) as ReportStatus[],
+            ]
+          }
 
           statsMap.set(manager.id, {
             total_reports: allReports.length,
@@ -78,6 +100,14 @@ export default function ManagersPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const getManagerIcon = (role: string) => {
+    return role === 'front_office_manager' ? <Hotel className="w-6 h-6 text-primary" /> : <User className="w-6 h-6 text-primary" />
+  }
+
+  const getManagerRoleLabel = (role: string) => {
+    return role === 'front_office_manager' ? 'Front Office Manager' : 'Manager'
   }
 
   if (loading) {
@@ -104,6 +134,9 @@ export default function ManagersPage() {
           <div>
             <div className="text-sm text-gray-600">Total Managers</div>
             <div className="text-2xl font-bold text-gray-900">{managers.length}</div>
+            <div className="text-xs text-gray-500 mt-1">
+              {managers.filter(m => m.role === 'manager').length} Regular • {managers.filter(m => m.role === 'front_office_manager').length} Front Office
+            </div>
           </div>
         </div>
       </div>
@@ -129,8 +162,8 @@ export default function ManagersPage() {
               <div key={manager.id} className="card hover:shadow-lg transition-shadow">
                 {/* Manager Header */}
                 <div className="flex items-start space-x-4 mb-4 pb-4 border-b border-gray-200">
-                  <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
-                    <User className="w-6 h-6 text-primary" />
+                  <div className={`w-12 h-12 ${manager.role === 'front_office_manager' ? 'bg-indigo-100' : 'bg-primary/10'} rounded-full flex items-center justify-center flex-shrink-0`}>
+                    {getManagerIcon(manager.role)}
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-lg font-semibold text-gray-900 truncate">
@@ -139,6 +172,15 @@ export default function ManagersPage() {
                     <div className="flex items-center space-x-2 text-sm text-gray-600 mt-1">
                       <Mail className="w-4 h-4" />
                       <span className="truncate">{manager.email}</span>
+                    </div>
+                    <div className="mt-1">
+                      <span className={`text-xs px-2 py-1 rounded-full ${
+                        manager.role === 'front_office_manager' 
+                          ? 'bg-indigo-100 text-indigo-800' 
+                          : 'bg-blue-100 text-blue-800'
+                      }`}>
+                        {getManagerRoleLabel(manager.role)}
+                      </span>
                     </div>
                   </div>
                 </div>

@@ -46,7 +46,11 @@ export default function LoginPage() {
         console.log('User not found in users table, creating...')
         
         // Determine role based on email (you can change this logic)
-        const role: 'manager' | 'bdm' = email.includes('bdm') ? 'bdm' : 'manager'
+        const role: 'manager' | 'bdm' | 'front_office_manager' = 
+          email.includes('bdm') ? 'bdm' : 
+          email.includes('frontoffice') || email.includes('front-office') || email.includes('fo') ? 'front_office_manager' :
+          'manager'
+        
         const fullName = data.user.email?.split('@')[0] || 'User'
         
         const { error: insertError } = await supabase
@@ -73,6 +77,8 @@ export default function LoginPage() {
               const typedRetryData = retryUserData as UserData
               if (typedRetryData.role === 'bdm') {
                 router.push('/bdm/dashboard')
+              } else if (typedRetryData.role === 'front_office_manager') {
+                router.push('/front-office/dashboard')
               } else {
                 router.push('/manager/dashboard')
               }
@@ -86,6 +92,8 @@ export default function LoginPage() {
         // Redirect based on role
         if (role === 'bdm') {
           router.push('/bdm/dashboard')
+        } else if (role === 'front_office_manager') {
+          router.push('/front-office/dashboard')
         } else {
           router.push('/manager/dashboard')
         }
@@ -95,6 +103,8 @@ export default function LoginPage() {
         // Redirect based on role
         if (typedUserData.role === 'bdm') {
           router.push('/bdm/dashboard')
+        } else if (typedUserData.role === 'front_office_manager') {
+          router.push('/front-office/dashboard')
         } else {
           router.push('/manager/dashboard')
         }
@@ -165,8 +175,12 @@ export default function LoginPage() {
           </form>
 
           <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-            <p className="text-sm text-blue-800 font-medium mb-2">Note:</p>
-            <p className="text-xs text-blue-700">If you have an existing account, it will automatically detect your role and redirect you to the appropriate dashboard.</p>
+            <p className="text-sm text-blue-800 font-medium mb-2">Login Guide:</p>
+            <div className="text-xs text-blue-700 space-y-1">
+              <p>• BDM: Include "bdm" in your email</p>
+              <p>• Front Office: Include "frontoffice" or "fo" in your email</p>
+              <p>• Store Manager: Any other email</p>
+            </div>
           </div>
 
           <p className="text-center text-sm text-gray-600 mt-6">
