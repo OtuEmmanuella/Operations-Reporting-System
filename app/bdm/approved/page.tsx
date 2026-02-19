@@ -1,296 +1,135 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import type { Database } from '@/lib/supabase'
-import { CheckCircle, User, ChevronDown, ChevronUp, Package, DollarSign, FileText, Calendar, Eye, Hotel, UserCheck, TrendingUp, MessageSquare } from 'lucide-react'
-import { format } from 'date-fns'
+import { CheckCircle, Package, DollarSign, Hotel, Users, TrendingUp, MessageSquare, AlertCircle, Calendar } from 'lucide-react'
+import { format, subDays } from 'date-fns'
 
-type StockReport = Database['public']['Tables']['stock_reports']['Row']
-type SalesReport = Database['public']['Tables']['sales_reports']['Row']
-type ExpenseReport = Database['public']['Tables']['expense_reports']['Row']
-
-interface Manager {
+interface Report {
   id: string
-  full_name: string
-  email: string
-  role: 'manager' | 'front_office_manager'
-}
-
-interface ApprovedReport {
-  id: string
-  type: 'stock' | 'sales' | 'expense' | 'occupancy' | 'guest_activity' | 'revenue' | 'complaint'
+  type: string
+  manager_id: string
+  manager_name: string
   report_date: string
-  approved_at: string
-  total_amount?: number
-  notes?: string
+  reviewed_at: string
+  status: string
 }
 
 export default function ApprovedReportsPage() {
-  const router = useRouter()
   const [loading, setLoading] = useState(true)
-  const [managers, setManagers] = useState<Manager[]>([])
-  const [selectedManager, setSelectedManager] = useState<string | null>(null)
-  const [reports, setReports] = useState<ApprovedReport[]>([])
-  const [expandedManager, setExpandedManager] = useState<string | null>(null)
+  const [reports, setReports] = useState<Report[]>([])
+  const [dateFilter, setDateFilter] = useState<'7d' | '30d' | 'all'>('30d')
 
   useEffect(() => {
-    loadManagers()
-  }, [])
+    loadReports()
+  }, [dateFilter])
 
-  useEffect(() => {
-    if (selectedManager) {
-      loadManagerReports(selectedManager)
-    } else {
-      setReports([])
-    }
-  }, [selectedManager])
-
-  const loadManagers = async () => {
+  const loadReports = async () => {
+    setLoading(true)
     try {
-      // Get both manager types
-      const { data: allManagers, error: managersError } = await supabase
-        .from('users')
-        .select('id, full_name, email, role')
-        .in('role', ['manager', 'front_office_manager'])
-        .order('full_name')
-
-      if (managersError) {
-        console.error('Error loading managers:', managersError)
-        return
+      // Calculate date range
+      let dateQuery = ''
+      if (dateFilter === '7d') {
+        dateQuery = format(subDays(new Date(), 7), 'yyyy-MM-dd')
+      } else if (dateFilter === '30d') {
+        dateQuery = format(subDays(new Date(), 30), 'yyyy-MM-dd')
       }
 
-      if (!allManagers || allManagers.length === 0) {
-        setManagers([])
-        setLoading(false)
-        return
-      }
-
-      const managersWithReports: Manager[] = []
-      
-      for (const manager of allManagers) {
-        let totalApproved = 0
-
-        if (manager.role === 'manager') {
-          const [stockCount, salesCount, expenseCount] = await Promise.all([
-            supabase
-              .from('stock_reports')
-              .select('id', { count: 'exact', head: true })
-              .eq('manager_id', manager.id)
-              .eq('status', 'approved'),
-            supabase
-              .from('sales_reports')
-              .select('id', { count: 'exact', head: true })
-              .eq('manager_id', manager.id)
-              .eq('status', 'approved'),
-            supabase
-              .from('expense_reports')
-              .select('id', { count: 'exact', head: true })
-              .eq('manager_id', manager.id)
-              .eq('status', 'approved'),
-          ])
-          totalApproved = (stockCount.count || 0) + (salesCount.count || 0) + (expenseCount.count || 0)
-        } else if (manager.role === 'front_office_manager') {
-          const [occupancyCount, guestCount, revenueCount, complaintCount] = await Promise.all([
-            supabase
-              .from('occupancy_reports')
-              .select('id', { count: 'exact', head: true })
-              .eq('manager_id', manager.id)
-              .eq('status', 'approved'),
-            supabase
-              .from('guest_activity_reports')
-              .select('id', { count: 'exact', head: true })
-              .eq('manager_id', manager.id)
-              .eq('status', 'approved'),
-            supabase
-              .from('revenue_reports')
-              .select('id', { count: 'exact', head: true })
-              .eq('manager_id', manager.id)
-              .eq('status', 'approved'),
-            supabase
-              .from('complaint_reports')
-              .select('id', { count: 'exact', head: true })
-              .eq('manager_id', manager.id)
-              .eq('status', 'approved'),
-          ])
-          totalApproved = (occupancyCount.count || 0) + (guestCount.count || 0) + (revenueCount.count || 0) + (complaintCount.count || 0)
+      // Load all approved reports
+      const fetchReports = async (table: string) => {
+        let query = supabase.from(table).select('*').eq('status', 'approved').order('reviewed_at', { ascending: false })
+        if (dateQuery) {
+          query = query.gte('report_date', dateQuery)
         }
-        
-        if (totalApproved > 0) {
-          managersWithReports.push(manager as Manager)
-        }
+        return query
       }
 
-      setManagers(managersWithReports)
+      const [stockReports, salesReports, occupancyReports, guestReports, revenueReports, complaintReports] = await Promise.all([
+        fetchReports('stock_inventory_reports'),
+        fetchReports('sales_reports'),
+        fetchReports('occupancy_reports'),
+        fetchReports('guest_activity_reports'),
+        fetchReports('revenue_reports'),
+        fetchReports('complaint_reports'),
+      ])
+
+      const allReports = [
+        ...(stockReports.data || []).map(r => ({ ...r, type: 'stock_inventory' })),
+        ...(salesReports.data || []).map(r => ({ ...r, type: 'sales' })),
+        ...(occupancyReports.data || []).map(r => ({ ...r, type: 'occupancy' })),
+        ...(guestReports.data || []).map(r => ({ ...r, type: 'guest_activity' })),
+        ...(revenueReports.data || []).map(r => ({ ...r, type: 'revenue' })),
+        ...(complaintReports.data || []).map(r => ({ ...r, type: 'complaint' })),
+      ]
+
+      // Get manager names
+      const reportsWithNames = await Promise.all(
+        allReports.map(async (report) => {
+          const { data: manager } = await supabase
+            .from('users')
+            .select('full_name')
+            .eq('id', report.manager_id)
+            .single()
+
+          return {
+            id: report.id,
+            type: report.type,
+            manager_id: report.manager_id,
+            manager_name: manager?.full_name || 'Unknown',
+            report_date: report.report_date,
+            reviewed_at: report.reviewed_at,
+            status: report.status,
+          }
+        })
+      )
+
+      // Sort by reviewed_at descending
+      reportsWithNames.sort((a, b) => new Date(b.reviewed_at).getTime() - new Date(a.reviewed_at).getTime())
+
+      setReports(reportsWithNames)
     } catch (error) {
-      console.error('Error loading managers:', error)
+      console.error('Error loading reports:', error)
     } finally {
       setLoading(false)
     }
   }
 
-  const loadManagerReports = async (managerId: string) => {
-    try {
-      const manager = managers.find(m => m.id === managerId)
-      if (!manager) return
-
-      let allReports: ApprovedReport[] = []
-
-      if (manager.role === 'manager') {
-        const [stockData, salesData, expenseData] = await Promise.all([
-          supabase
-            .from('stock_reports')
-            .select('*')
-            .eq('manager_id', managerId)
-            .eq('status', 'approved')
-            .order('reviewed_at', { ascending: false }),
-          supabase
-            .from('sales_reports')
-            .select('*')
-            .eq('manager_id', managerId)
-            .eq('status', 'approved')
-            .order('reviewed_at', { ascending: false }),
-          supabase
-            .from('expense_reports')
-            .select('*')
-            .eq('manager_id', managerId)
-            .eq('status', 'approved')
-            .order('reviewed_at', { ascending: false }),
-        ])
-
-        allReports = [
-          ...(stockData.data || []).map((r: StockReport) => ({
-            id: r.id,
-            type: 'stock' as const,
-            report_date: r.report_date,
-            approved_at: r.reviewed_at || '',
-            notes: r.notes || undefined,
-          })),
-          ...(salesData.data || []).map((r: SalesReport) => ({
-            id: r.id,
-            type: 'sales' as const,
-            report_date: r.report_date,
-            approved_at: r.reviewed_at || '',
-            total_amount: r.total_amount || undefined,
-            notes: r.notes || undefined,
-          })),
-          ...(expenseData.data || []).map((r: ExpenseReport) => ({
-            id: r.id,
-            type: 'expense' as const,
-            report_date: r.report_date,
-            approved_at: r.reviewed_at || '',
-            notes: r.notes || undefined,
-          })),
-        ]
-      } else if (manager.role === 'front_office_manager') {
-        const [occupancyData, guestData, revenueData, complaintData] = await Promise.all([
-          supabase
-            .from('occupancy_reports')
-            .select('*')
-            .eq('manager_id', managerId)
-            .eq('status', 'approved')
-            .order('reviewed_at', { ascending: false }),
-          supabase
-            .from('guest_activity_reports')
-            .select('*')
-            .eq('manager_id', managerId)
-            .eq('status', 'approved')
-            .order('reviewed_at', { ascending: false }),
-          supabase
-            .from('revenue_reports')
-            .select('*')
-            .eq('manager_id', managerId)
-            .eq('status', 'approved')
-            .order('reviewed_at', { ascending: false }),
-          supabase
-            .from('complaint_reports')
-            .select('*')
-            .eq('manager_id', managerId)
-            .eq('status', 'approved')
-            .order('reviewed_at', { ascending: false }),
-        ])
-
-        allReports = [
-          ...(occupancyData.data || []).map((r: any) => ({
-            id: r.id,
-            type: 'occupancy' as const,
-            report_date: r.report_date,
-            approved_at: r.reviewed_at || '',
-            notes: r.notes || undefined,
-          })),
-          ...(guestData.data || []).map((r: any) => ({
-            id: r.id,
-            type: 'guest_activity' as const,
-            report_date: r.report_date,
-            approved_at: r.reviewed_at || '',
-            notes: r.notes || undefined,
-          })),
-          ...(revenueData.data || []).map((r: any) => ({
-            id: r.id,
-            type: 'revenue' as const,
-            report_date: r.report_date,
-            approved_at: r.reviewed_at || '',
-            total_amount: r.total_revenue || undefined,
-            notes: r.notes || undefined,
-          })),
-          ...(complaintData.data || []).map((r: any) => ({
-            id: r.id,
-            type: 'complaint' as const,
-            report_date: r.report_date,
-            approved_at: r.reviewed_at || '',
-            notes: r.notes || undefined,
-          })),
-        ]
-      }
-
-      allReports.sort((a, b) => new Date(b.approved_at).getTime() - new Date(a.approved_at).getTime())
-      setReports(allReports)
-    } catch (error) {
-      console.error('Error loading reports:', error)
-    }
-  }
-
-  const getReportIcon = (type: string) => {
-    switch (type) {
-      case 'stock':
-        return <Package className="w-5 h-5 text-blue-500" />
-      case 'sales':
-        return <DollarSign className="w-5 h-5 text-green-500" />
-      case 'expense':
-        return <FileText className="w-5 h-5 text-purple-500" />
-      case 'occupancy':
-        return <Hotel className="w-5 h-5 text-indigo-500" />
-      case 'guest_activity':
-        return <UserCheck className="w-5 h-5 text-pink-500" />
-      case 'revenue':
-        return <TrendingUp className="w-5 h-5 text-emerald-500" />
-      case 'complaint':
-        return <MessageSquare className="w-5 h-5 text-red-500" />
-    }
-  }
-
   const getReportTypeLabel = (type: string) => {
-    switch (type) {
-      case 'stock':
-        return 'Stock Report'
-      case 'sales':
-        return 'Sales Report'
-      case 'expense':
-        return 'Expense Report'
-      case 'occupancy':
-        return 'Occupancy Report'
-      case 'guest_activity':
-        return 'Guest Activity Report'
-      case 'revenue':
-        return 'Revenue Report'
-      case 'complaint':
-        return 'Complaint Report'
+    const labels: Record<string, string> = {
+      stock_inventory: 'Stock & Inventory',
+      sales: 'Sales',
+      occupancy: 'Occupancy',
+      guest_activity: 'Guest Activity',
+      revenue: 'Revenue',
+      complaint: 'Complaint',
     }
+    return labels[type] || type
   }
 
-  const handleViewReport = (report: ApprovedReport) => {
-    router.push(`/bdm/review/${report.type}/${report.id}`)
+  const getReportTypeIcon = (type: string) => {
+    const icons: Record<string, any> = {
+      stock_inventory: Package,
+      sales: DollarSign,
+      occupancy: Hotel,
+      guest_activity: Users,
+      revenue: TrendingUp,
+      complaint: MessageSquare,
+    }
+    const Icon = icons[type] || AlertCircle
+    return <Icon className="w-5 h-5" />
+  }
+
+  const getReportTypeColor = (type: string) => {
+    const colors: Record<string, string> = {
+      stock_inventory: 'bg-blue-100 text-blue-700',
+      sales: 'bg-green-100 text-green-700',
+      occupancy: 'bg-purple-100 text-purple-700',
+      guest_activity: 'bg-indigo-100 text-indigo-700',
+      revenue: 'bg-emerald-100 text-emerald-700',
+      complaint: 'bg-orange-100 text-orange-700',
+    }
+    return colors[type] || 'bg-gray-100 text-gray-700'
   }
 
   if (loading) {
@@ -305,127 +144,97 @@ export default function ApprovedReportsPage() {
     <div className="p-8">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900">Approved Reports</h1>
-        <p className="text-gray-600 mt-2">View all approved reports by manager</p>
+        <p className="text-gray-600 mt-2">View all approved reports</p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Managers List */}
-        <div className="lg:col-span-1">
-          <div className="card">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">
-              Managers ({managers.length})
-            </h2>
-            <div className="space-y-2">
-              {managers.length === 0 ? (
-                <div className="text-center py-8">
-                  <User className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                  <p className="text-gray-600 text-sm">No managers with approved reports</p>
-                </div>
-              ) : (
-                managers.map((manager) => (
-                  <button
-                    key={manager.id}
-                    onClick={() => {
-                      setSelectedManager(manager.id)
-                      setExpandedManager(manager.id === expandedManager ? null : manager.id)
-                    }}
-                    className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${
-                      selectedManager === manager.id
-                        ? 'bg-primary text-white'
-                        : 'bg-gray-50 hover:bg-gray-100 text-gray-900'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        {manager.role === 'front_office_manager' ? <Hotel className="w-5 h-5" /> : <User className="w-5 h-5" />}
-                        <div>
-                          <div className="font-medium">{manager.full_name}</div>
-                          <div className={`text-xs ${selectedManager === manager.id ? 'text-white/80' : 'text-gray-500'}`}>
-                            {manager.role === 'front_office_manager' ? 'Front Office' : 'Manager'}
-                          </div>
-                        </div>
-                      </div>
-                      {expandedManager === manager.id ? (
-                        <ChevronUp className="w-5 h-5" />
-                      ) : (
-                        <ChevronDown className="w-5 h-5" />
-                      )}
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
+      {/* Date Filter */}
+      <div className="flex items-center space-x-2 mb-6">
+        <Calendar className="w-5 h-5 text-gray-500" />
+        <span className="text-sm font-medium text-gray-700">Show:</span>
+        {[
+          { value: '7d' as const, label: 'Last 7 Days' },
+          { value: '30d' as const, label: 'Last 30 Days' },
+          { value: 'all' as const, label: 'All Time' },
+        ].map(option => (
+          <button
+            key={option.value}
+            onClick={() => setDateFilter(option.value)}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+              dateFilter === option.value ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        <div className="card bg-green-50 border-green-200">
+          <div className="text-sm font-medium text-gray-600">Total Approved</div>
+          <div className="text-3xl font-bold text-green-600 mt-2">{reports.length}</div>
+        </div>
+        <div className="card">
+          <div className="text-sm font-medium text-gray-600">Store Reports</div>
+          <div className="text-2xl font-bold text-gray-900 mt-2">
+            {reports.filter(r => ['stock_inventory', 'sales'].includes(r.type)).length}
           </div>
         </div>
+        <div className="card">
+          <div className="text-sm font-medium text-gray-600">Front Office Reports</div>
+          <div className="text-2xl font-bold text-gray-900 mt-2">
+            {reports.filter(r => ['occupancy', 'guest_activity', 'revenue', 'complaint'].includes(r.type)).length}
+          </div>
+        </div>
+      </div>
 
-        {/* Reports List */}
-        <div className="lg:col-span-2">
-          {!selectedManager ? (
-            <div className="card text-center py-12">
-              <User className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">Select a Manager</h3>
-              <p className="text-gray-600">Choose a manager from the list to view their approved reports</p>
-            </div>
-          ) : reports.length === 0 ? (
-            <div className="card text-center py-12">
-              <CheckCircle className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">No Approved Reports</h3>
-              <p className="text-gray-600">This manager has no approved reports yet</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {reports.map((report) => (
-                <div 
-                  key={report.id} 
-                  className="card hover:shadow-lg transition-all cursor-pointer border-l-4 border-green-500"
-                  onClick={() => handleViewReport(report)}
+      {/* Reports List */}
+      <div className="card">
+        {reports.length === 0 ? (
+          <div className="text-center py-12">
+            <CheckCircle className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+            <p className="text-gray-600 text-lg">No approved reports</p>
+            <p className="text-gray-500 text-sm mt-2">Approved reports will appear here</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {reports.map((report) => {
+              const Icon = getReportTypeIcon(report.type)
+              return (
+                <Link
+                  key={report.id}
+                  href={`/bdm/review/${report.type}/${report.id}`}
+                  className="block"
                 >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start space-x-4 flex-1">
-                      <div className="mt-1">
-                        {getReportIcon(report.type)}
+                  <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                    <div className="flex items-center space-x-4 flex-1">
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${getReportTypeColor(report.type)}`}>
+                        {Icon}
                       </div>
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-3 mb-2">
-                          <h3 className="text-lg font-semibold text-gray-900">
-                            {getReportTypeLabel(report.type)}
-                          </h3>
-                          <span className="status-badge status-approved">Approved</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center space-x-2 mb-1">
+                          <span className="font-semibold text-gray-900">{getReportTypeLabel(report.type)}</span>
+                          <CheckCircle className="w-4 h-4 text-green-500" />
                         </div>
-                        
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div className="flex items-center space-x-2 text-gray-600">
-                            <Calendar className="w-4 h-4" />
-                            <span>Report: {format(new Date(report.report_date), 'MMM dd, yyyy')}</span>
-                          </div>
-                          <div className="flex items-center space-x-2 text-gray-600">
-                            <CheckCircle className="w-4 h-4" />
-                            <span>Approved: {format(new Date(report.approved_at), 'MMM dd, yyyy')}</span>
-                          </div>
-                          {report.total_amount !== undefined && (
-                            <div className="text-gray-600 col-span-2">
-                              <span className="font-semibold">Amount: ₦{report.total_amount.toFixed(2)}</span>
-                            </div>
-                          )}
+                        <div className="text-sm text-gray-600">
+                          {report.manager_name} • {format(new Date(report.report_date), 'MMM dd, yyyy')}
                         </div>
-
-                        {report.notes && (
-                          <div className="mt-3 text-sm text-gray-600 bg-gray-50 p-3 rounded">
-                            <span className="font-medium">Notes:</span> {report.notes}
-                          </div>
-                        )}
+                        <div className="text-xs text-gray-500 mt-1">
+                          Approved {format(new Date(report.reviewed_at), 'MMM dd, yyyy \'at\' h:mm a')}
+                        </div>
                       </div>
                     </div>
-                    <button className="btn-primary flex items-center space-x-2">
-                      <Eye className="w-4 h-4" />
-                      <span>View</span>
-                    </button>
+                    <div className="flex items-center space-x-3">
+                      <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">
+                        Approved
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                </Link>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )

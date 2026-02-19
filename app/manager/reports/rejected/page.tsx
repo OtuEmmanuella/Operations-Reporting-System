@@ -35,8 +35,8 @@ export default function ManagerRejectedReportsPage() {
 
       const [stockData, salesData, expenseData] = await Promise.all([
         supabase
-          .from('stock_reports')
-          .select('*, reviewer:users!stock_reports_reviewed_by_fkey(full_name)')
+          .from('stock_inventory_reports')  // ✅ correct table
+          .select('*, reviewer:users!stock_inventory_reports_reviewed_by_fkey(full_name)')
           .eq('manager_id', user.id)
           .eq('status', 'rejected')
           .order('reviewed_at', { ascending: false }),
@@ -102,37 +102,27 @@ export default function ManagerRejectedReportsPage() {
 
   const getReportIcon = (type: string) => {
     switch (type) {
-      case 'stock':
-        return <Package className="w-5 h-5 text-blue-500" />
-      case 'sales':
-        return <DollarSign className="w-5 h-5 text-green-500" />
-      case 'expense':
-        return <FileText className="w-5 h-5 text-purple-500" />
+      case 'stock': return <Package className="w-5 h-5 text-blue-500" />
+      case 'sales': return <DollarSign className="w-5 h-5 text-green-500" />
+      case 'expense': return <FileText className="w-5 h-5 text-purple-500" />
     }
   }
 
   const getReportTypeLabel = (type: string) => {
     switch (type) {
-      case 'stock':
-        return 'Stock Report'
-      case 'sales':
-        return 'Sales Report'
-      case 'expense':
-        return 'Expense Report'
+      case 'stock': return 'Stock & Inventory Report'
+      case 'sales': return 'Sales Report'
+      case 'expense': return 'Expense Report'
     }
   }
 
+  // ✅ Pass source=rejected so the view page knows where to go back
   const handleViewReport = (report: RejectedReport) => {
-    // Navigate to view/edit page
-    router.push(`/manager/reports/view/${report.type}/${report.id}`)
+    router.push(`/manager/reports/view/${report.type}/${report.id}?source=rejected`)
   }
 
   if (loading) {
-    return (
-      <div className="p-8">
-        <div className="text-lg text-gray-600">Loading rejected reports...</div>
-      </div>
-    )
+    return <div className="p-8"><div className="text-lg text-gray-600">Loading rejected reports...</div></div>
   }
 
   return (
@@ -151,21 +141,17 @@ export default function ManagerRejectedReportsPage() {
       ) : (
         <div className="space-y-4">
           {reports.map((report) => (
-            <div 
-              key={report.id} 
+            <div
+              key={report.id}
               className="card border-l-4 border-red-500 hover:shadow-lg transition-all cursor-pointer"
               onClick={() => handleViewReport(report)}
             >
               <div className="flex items-start space-x-4">
-                <div className="mt-1">
-                  {getReportIcon(report.type)}
-                </div>
+                <div className="mt-1">{getReportIcon(report.type)}</div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-3">
-                      <h3 className="text-lg font-semibold text-gray-900">
-                        {getReportTypeLabel(report.type)}
-                      </h3>
+                      <h3 className="text-lg font-semibold text-gray-900">{getReportTypeLabel(report.type)}</h3>
                       <span className="status-badge status-rejected">Rejected</span>
                     </div>
                     <button className="btn-primary flex items-center space-x-2">
@@ -173,7 +159,7 @@ export default function ManagerRejectedReportsPage() {
                       <span>View Details</span>
                     </button>
                   </div>
-                  
+
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm text-gray-600 mb-3">
                     <div className="flex items-center space-x-2">
                       <Calendar className="w-4 h-4" />

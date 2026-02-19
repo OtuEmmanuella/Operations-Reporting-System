@@ -16,29 +16,8 @@ interface ReportStats {
 
 interface RecentReport {
   id: string
-  type: 'stock' | 'sales' | 'expense'
+  type: 'stock_inventory' | 'sales'
   date: string
-  status: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
-  created_at: string
-}
-
-interface StockReportData {
-  id: string
-  report_date: string
-  status: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
-  created_at: string
-}
-
-interface SalesReportData {
-  id: string
-  report_date: string
-  status: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
-  created_at: string
-}
-
-interface ExpenseReportData {
-  id: string
-  report_date: string
   status: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
   created_at: string
 }
@@ -63,17 +42,23 @@ export default function ManagerDashboard() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      // Fetch all reports
-      const [stockData, salesData, expenseData] = await Promise.all([
-        supabase.from('stock_reports').select('*').eq('manager_id', user.id).order('created_at', { ascending: false }),
-        supabase.from('sales_reports').select('*').eq('manager_id', user.id).order('created_at', { ascending: false }),
-        supabase.from('expense_reports').select('*').eq('manager_id', user.id).order('created_at', { ascending: false }),
+      // Fetch new unified reports
+      const [stockData, salesData] = await Promise.all([
+        supabase
+          .from('stock_inventory_reports')
+          .select('*')
+          .eq('manager_id', user.id)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('sales_reports')
+          .select('*')
+          .eq('manager_id', user.id)
+          .order('created_at', { ascending: false }),
       ])
 
       const allReports = [
-        ...(stockData.data || []).map((r: StockReportData) => ({ ...r, type: 'stock' as const })),
-        ...(salesData.data || []).map((r: SalesReportData) => ({ ...r, type: 'sales' as const })),
-        ...(expenseData.data || []).map((r: ExpenseReportData) => ({ ...r, type: 'expense' as const })),
+        ...(stockData.data || []).map((r: any) => ({ ...r, type: 'stock_inventory' as const })),
+        ...(salesData.data || []).map((r: any) => ({ ...r, type: 'sales' as const })),
       ]
 
       // Calculate stats
@@ -108,25 +93,18 @@ export default function ManagerDashboard() {
 
   const quickActions = [
     {
-      title: 'Submit Stock Report',
-      description: 'Report current inventory levels',
+      title: 'Submit Stock & Inventory',
+      description: 'Daily stock movement & sales',
       icon: Package,
       href: '/manager/stock-report',
       color: 'bg-blue-500',
     },
     {
       title: 'Submit Sales Report',
-      description: 'Record today\'s sales',
+      description: 'Record today\'s sales details',
       icon: DollarSign,
       href: '/manager/sales-report',
       color: 'bg-green-500',
-    },
-    {
-      title: 'Submit Expense Report',
-      description: 'Log requisitions received',
-      icon: FileText,
-      href: '/manager/expense-report',
-      color: 'bg-purple-500',
     },
   ]
 
@@ -147,12 +125,10 @@ export default function ManagerDashboard() {
 
   const getReportTypeLabel = (type: string) => {
     switch (type) {
-      case 'stock':
-        return 'Stock Report'
+      case 'stock_inventory':
+        return 'Stock & Inventory Report'
       case 'sales':
         return 'Sales Report'
-      case 'expense':
-        return 'Expense Report'
       default:
         return 'Report'
     }
@@ -212,7 +188,7 @@ export default function ManagerDashboard() {
       {/* Quick Actions */}
       <div className="mb-8">
         <h2 className="text-xl font-bold text-gray-900 mb-4">Quick Actions</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {quickActions.map((action) => {
             const Icon = action.icon
             return (

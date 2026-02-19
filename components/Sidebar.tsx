@@ -36,7 +36,6 @@ export default function Sidebar() {
     loadUserProfile()
   }, [])
 
-  // Auto-open section if current path matches
   useEffect(() => {
     if (!userProfile) return
     const sections = getSections(userProfile.role)
@@ -52,7 +51,11 @@ export default function Sidebar() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/'); return }
 
-      const { data: profile, error } = await supabase.from('users').select('full_name, role, position, department').eq('id', user.id).single()
+      const { data: profile, error } = await supabase
+        .from('users')
+        .select('full_name, role, position, department')
+        .eq('id', user.id)
+        .single()
 
       if (error && error.code === 'PGRST116') {
         const role: 'manager' | 'bdm' | 'front_office_manager' =
@@ -93,9 +96,8 @@ export default function Sidebar() {
       {
         label: 'Submit Reports', icon: FileText,
         items: [
-          { href: '/manager/stock-report', label: 'Stock Report', icon: Package },
-          { href: '/manager/sales-report', label: 'Sales Report', icon: DollarSign },
-          { href: '/manager/expense-report', label: 'Expense Report', icon: FileText },
+          { href: '/manager/stock-report', label: 'Stock & Inventory', icon: Package },
+          
         ],
       },
       {
@@ -114,6 +116,7 @@ export default function Sidebar() {
         items: [
           { href: '/bdm/dashboard', label: 'Dashboard', icon: Home },
           { href: '/bdm/managers', label: 'Managers', icon: Users },
+          { href: '/bdm/analytics', label: 'Analytics', icon: BarChart3 },
         ],
       },
       {
@@ -162,12 +165,26 @@ export default function Sidebar() {
   const getInitials = (name: string) =>
     name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
 
-  const getRoleLabel = (role: string) => ({
-    manager: 'Store Manager', bdm: 'Business Dev. Manager', front_office_manager: 'Front Office Manager'
-  }[role] || 'User')
+  // FIX: Use actual position if available, otherwise use role-based label
+  const getDisplayRole = () => {
+    // If position is set, use it
+    if (userProfile?.position?.trim()) {
+      return userProfile.position
+    }
+    
+    // Otherwise fallback to role-based labels
+    const roleLabels: Record<string, string> = {
+      manager: 'Store Manager',
+      bdm: 'Business Dev. Manager',
+      front_office_manager: 'Front Office Manager'
+    }
+    return roleLabels[userProfile?.role || ''] || 'User'
+  }
 
   const getRoleColor = (role: string) => ({
-    manager: 'bg-indigo-100 text-indigo-700', bdm: 'bg-purple-100 text-purple-700', front_office_manager: 'bg-teal-100 text-teal-700'
+    manager: 'bg-indigo-100 text-indigo-700',
+    bdm: 'bg-purple-100 text-purple-700',
+    front_office_manager: 'bg-teal-100 text-teal-700'
   }[role] || 'bg-gray-100 text-gray-700')
 
   if (loading || !userProfile) {
@@ -213,7 +230,7 @@ export default function Sidebar() {
             </div>
           </div>
           <span className={clsx('mt-2 inline-block px-2 py-0.5 text-xs font-medium rounded-full', getRoleColor(userProfile.role))}>
-            {getRoleLabel(userProfile.role)}
+            {getDisplayRole()}
           </span>
         </div>
       )}
@@ -233,7 +250,6 @@ export default function Sidebar() {
           const hasActiveItem = section.items.some(item => pathname === item.href || pathname.startsWith(item.href + '/'))
 
           if (collapsed) {
-            // Collapsed: show only icons with tooltip
             return (
               <div key={section.label} className="space-y-0.5">
                 {section.items.map(item => {
@@ -253,7 +269,6 @@ export default function Sidebar() {
 
           return (
             <div key={section.label} className="mb-1">
-              {/* Section header - clickable to expand/collapse */}
               <button onClick={() => toggleSection(section.label)}
                 className={clsx(
                   'w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors',
@@ -266,7 +281,6 @@ export default function Sidebar() {
                 {isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
               </button>
 
-              {/* Section items */}
               {isOpen && (
                 <div className="mt-0.5 ml-2 space-y-0.5">
                   {section.items.map(item => {

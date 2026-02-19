@@ -1,139 +1,137 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { XCircle, Package, DollarSign, FileText, Calendar, User, Clock, AlertTriangle } from 'lucide-react'
-import { format, isPast, parseISO } from 'date-fns'
+import { XCircle, Package, DollarSign, Hotel, Users, TrendingUp, MessageSquare, AlertCircle, Calendar } from 'lucide-react'
+import { format, subDays } from 'date-fns'
 
-interface RejectedReport {
+interface Report {
   id: string
-  type: 'stock' | 'sales' | 'expense'
+  type: string
   manager_id: string
   manager_name: string
   report_date: string
-  rejected_at: string
+  reviewed_at: string
   rejection_reason: string
-  rejection_feedback: string
-  resubmission_deadline: string | null
-  total_amount?: number
-  notes?: string
-  is_overdue: boolean
+  status: string
 }
 
 export default function RejectedReportsPage() {
-  const router = useRouter()
   const [loading, setLoading] = useState(true)
-  const [reports, setReports] = useState<RejectedReport[]>([])
-  const [filter, setFilter] = useState<'all' | 'overdue' | 'pending'>('all')
+  const [reports, setReports] = useState<Report[]>([])
+  const [dateFilter, setDateFilter] = useState<'7d' | '30d' | 'all'>('30d')
 
   useEffect(() => {
-    loadRejectedReports()
-  }, [])
+    loadReports()
+  }, [dateFilter])
 
-  const loadRejectedReports = async () => {
+  const loadReports = async () => {
+    setLoading(true)
     try {
-      const [stockData, salesData, expenseData] = await Promise.all([
-        supabase
-          .from('stock_reports')
-          .select('*, users!stock_reports_manager_id_fkey(full_name)')
-          .eq('status', 'rejected')
-          .order('reviewed_at', { ascending: false }),
-        supabase
-          .from('sales_reports')
-          .select('*, users!sales_reports_manager_id_fkey(full_name)')
-          .eq('status', 'rejected')
-          .order('reviewed_at', { ascending: false }),
-        supabase
-          .from('expense_reports')
-          .select('*, users!expense_reports_manager_id_fkey(full_name)')
-          .eq('status', 'rejected')
-          .order('reviewed_at', { ascending: false }),
+      // Calculate date range
+      let dateQuery = ''
+      if (dateFilter === '7d') {
+        dateQuery = format(subDays(new Date(), 7), 'yyyy-MM-dd')
+      } else if (dateFilter === '30d') {
+        dateQuery = format(subDays(new Date(), 30), 'yyyy-MM-dd')
+      }
+
+      // Load all rejected reports
+      const fetchReports = async (table: string) => {
+        let query = supabase.from(table).select('*').eq('status', 'rejected').order('reviewed_at', { ascending: false })
+        if (dateQuery) {
+          query = query.gte('report_date', dateQuery)
+        }
+        return query
+      }
+
+      const [stockReports, salesReports, occupancyReports, guestReports, revenueReports, complaintReports] = await Promise.all([
+        fetchReports('stock_inventory_reports'),
+        fetchReports('sales_reports'),
+        fetchReports('occupancy_reports'),
+        fetchReports('guest_activity_reports'),
+        fetchReports('revenue_reports'),
+        fetchReports('complaint_reports'),
       ])
 
-      const allReports: RejectedReport[] = [
-        ...(stockData.data || []).map((r: any) => ({
-          id: r.id,
-          type: 'stock' as const,
-          manager_id: r.manager_id,
-          manager_name: r.users?.full_name || 'Unknown',
-          report_date: r.report_date,
-          rejected_at: r.reviewed_at,
-          rejection_reason: r.rejection_reason || 'No reason provided',
-          rejection_feedback: r.rejection_feedback || 'No feedback provided',
-          resubmission_deadline: r.resubmission_deadline,
-          notes: r.notes,
-          is_overdue: r.resubmission_deadline ? isPast(parseISO(r.resubmission_deadline)) : false,
-        })),
-        ...(salesData.data || []).map((r: any) => ({
-          id: r.id,
-          type: 'sales' as const,
-          manager_id: r.manager_id,
-          manager_name: r.users?.full_name || 'Unknown',
-          report_date: r.report_date,
-          rejected_at: r.reviewed_at,
-          rejection_reason: r.rejection_reason || 'No reason provided',
-          rejection_feedback: r.rejection_feedback || 'No feedback provided',
-          resubmission_deadline: r.resubmission_deadline,
-          total_amount: r.total_amount,
-          notes: r.notes,
-          is_overdue: r.resubmission_deadline ? isPast(parseISO(r.resubmission_deadline)) : false,
-        })),
-        ...(expenseData.data || []).map((r: any) => ({
-          id: r.id,
-          type: 'expense' as const,
-          manager_id: r.manager_id,
-          manager_name: r.users?.full_name || 'Unknown',
-          report_date: r.report_date,
-          rejected_at: r.reviewed_at,
-          rejection_reason: r.rejection_reason || 'No reason provided',
-          rejection_feedback: r.rejection_feedback || 'No feedback provided',
-          resubmission_deadline: r.resubmission_deadline,
-          total_amount: r.total_amount,
-          notes: r.notes,
-          is_overdue: r.resubmission_deadline ? isPast(parseISO(r.resubmission_deadline)) : false,
-        })),
+      const allReports = [
+        ...(stockReports.data || []).map(r => ({ ...r, type: 'stock_inventory' })),
+        ...(salesReports.data || []).map(r => ({ ...r, type: 'sales' })),
+        ...(occupancyReports.data || []).map(r => ({ ...r, type: 'occupancy' })),
+        ...(guestReports.data || []).map(r => ({ ...r, type: 'guest_activity' })),
+        ...(revenueReports.data || []).map(r => ({ ...r, type: 'revenue' })),
+        ...(complaintReports.data || []).map(r => ({ ...r, type: 'complaint' })),
       ]
 
-      allReports.sort((a, b) => new Date(b.rejected_at).getTime() - new Date(a.rejected_at).getTime())
-      setReports(allReports)
+      // Get manager names
+      const reportsWithNames = await Promise.all(
+        allReports.map(async (report) => {
+          const { data: manager } = await supabase
+            .from('users')
+            .select('full_name')
+            .eq('id', report.manager_id)
+            .single()
+
+          return {
+            id: report.id,
+            type: report.type,
+            manager_id: report.manager_id,
+            manager_name: manager?.full_name || 'Unknown',
+            report_date: report.report_date,
+            reviewed_at: report.reviewed_at,
+            rejection_reason: report.rejection_reason || 'No reason provided',
+            status: report.status,
+          }
+        })
+      )
+
+      // Sort by reviewed_at descending
+      reportsWithNames.sort((a, b) => new Date(b.reviewed_at).getTime() - new Date(a.reviewed_at).getTime())
+
+      setReports(reportsWithNames)
     } catch (error) {
-      console.error('Error loading rejected reports:', error)
+      console.error('Error loading reports:', error)
     } finally {
       setLoading(false)
     }
   }
 
-  const filteredReports = reports.filter(report => {
-    if (filter === 'overdue') return report.is_overdue
-    if (filter === 'pending') return !report.is_overdue && report.resubmission_deadline
-    return true
-  })
-
-  const getReportIcon = (type: string) => {
-    switch (type) {
-      case 'stock':
-        return <Package className="w-5 h-5 text-blue-500" />
-      case 'sales':
-        return <DollarSign className="w-5 h-5 text-green-500" />
-      case 'expense':
-        return <FileText className="w-5 h-5 text-purple-500" />
-    }
-  }
-
   const getReportTypeLabel = (type: string) => {
-    switch (type) {
-      case 'stock':
-        return 'Stock Report'
-      case 'sales':
-        return 'Sales Report'
-      case 'expense':
-        return 'Expense Report'
+    const labels: Record<string, string> = {
+      stock_inventory: 'Stock & Inventory',
+      sales: 'Sales',
+      occupancy: 'Occupancy',
+      guest_activity: 'Guest Activity',
+      revenue: 'Revenue',
+      complaint: 'Complaint',
     }
+    return labels[type] || type
   }
 
-  const handleViewReport = (report: RejectedReport) => {
-    router.push(`/bdm/review/${report.type}/${report.id}`)
+  const getReportTypeIcon = (type: string) => {
+    const icons: Record<string, any> = {
+      stock_inventory: Package,
+      sales: DollarSign,
+      occupancy: Hotel,
+      guest_activity: Users,
+      revenue: TrendingUp,
+      complaint: MessageSquare,
+    }
+    const Icon = icons[type] || AlertCircle
+    return <Icon className="w-5 h-5" />
+  }
+
+  const getReportTypeColor = (type: string) => {
+    const colors: Record<string, string> = {
+      stock_inventory: 'bg-blue-100 text-blue-700',
+      sales: 'bg-green-100 text-green-700',
+      occupancy: 'bg-purple-100 text-purple-700',
+      guest_activity: 'bg-indigo-100 text-indigo-700',
+      revenue: 'bg-emerald-100 text-emerald-700',
+      complaint: 'bg-orange-100 text-orange-700',
+    }
+    return colors[type] || 'bg-gray-100 text-gray-700'
   }
 
   if (loading) {
@@ -144,173 +142,106 @@ export default function RejectedReportsPage() {
     )
   }
 
-  const overdueCount = reports.filter(r => r.is_overdue).length
-  const pendingResubmissionCount = reports.filter(r => !r.is_overdue && r.resubmission_deadline).length
-
   return (
     <div className="p-8">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900">Rejected Reports</h1>
-        <p className="text-gray-600 mt-2">Monitor rejected reports and resubmission deadlines</p>
+        <p className="text-gray-600 mt-2">View all rejected reports</p>
       </div>
 
-      {/* Stats Cards */}
+      {/* Date Filter */}
+      <div className="flex items-center space-x-2 mb-6">
+        <Calendar className="w-5 h-5 text-gray-500" />
+        <span className="text-sm font-medium text-gray-700">Show:</span>
+        {[
+          { value: '7d' as const, label: 'Last 7 Days' },
+          { value: '30d' as const, label: 'Last 30 Days' },
+          { value: 'all' as const, label: 'All Time' },
+        ].map(option => (
+          <button
+            key={option.value}
+            onClick={() => setDateFilter(option.value)}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+              dateFilter === option.value ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-        <div className="card">
-          <div className="text-sm font-medium text-gray-600">Total Rejected</div>
-          <div className="text-3xl font-bold text-gray-900 mt-2">{reports.length}</div>
-        </div>
         <div className="card bg-red-50 border-red-200">
-          <div className="text-sm font-medium text-red-600">Overdue Resubmissions</div>
-          <div className="text-3xl font-bold text-red-600 mt-2">{overdueCount}</div>
+          <div className="text-sm font-medium text-gray-600">Total Rejected</div>
+          <div className="text-3xl font-bold text-red-600 mt-2">{reports.length}</div>
         </div>
-        <div className="card bg-yellow-50 border-yellow-200">
-          <div className="text-sm font-medium text-yellow-600">Pending Resubmission</div>
-          <div className="text-3xl font-bold text-yellow-600 mt-2">{pendingResubmissionCount}</div>
+        <div className="card">
+          <div className="text-sm font-medium text-gray-600">Store Reports</div>
+          <div className="text-2xl font-bold text-gray-900 mt-2">
+            {reports.filter(r => ['stock_inventory', 'sales'].includes(r.type)).length}
+          </div>
         </div>
-      </div>
-
-      {/* Filter Buttons */}
-      <div className="flex space-x-4 mb-6">
-        <button
-          onClick={() => setFilter('all')}
-          className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-            filter === 'all'
-              ? 'bg-primary text-white'
-              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-          }`}
-        >
-          All ({reports.length})
-        </button>
-        <button
-          onClick={() => setFilter('overdue')}
-          className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-            filter === 'overdue'
-              ? 'bg-red-600 text-white'
-              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-          }`}
-        >
-          Overdue ({overdueCount})
-        </button>
-        <button
-          onClick={() => setFilter('pending')}
-          className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-            filter === 'pending'
-              ? 'bg-yellow-600 text-white'
-              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-          }`}
-        >
-          Pending Resubmission ({pendingResubmissionCount})
-        </button>
+        <div className="card">
+          <div className="text-sm font-medium text-gray-600">Front Office Reports</div>
+          <div className="text-2xl font-bold text-gray-900 mt-2">
+            {reports.filter(r => ['occupancy', 'guest_activity', 'revenue', 'complaint'].includes(r.type)).length}
+          </div>
+        </div>
       </div>
 
       {/* Reports List */}
-      {filteredReports.length === 0 ? (
-        <div className="card text-center py-12">
-          <XCircle className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Rejected Reports</h3>
-          <p className="text-gray-600">
-            {filter === 'all' && 'No reports have been rejected'}
-            {filter === 'overdue' && 'No overdue resubmissions'}
-            {filter === 'pending' && 'No pending resubmissions'}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {filteredReports.map((report) => (
-            <div
-              key={report.id}
-              className={`card border-l-4 ${
-                report.is_overdue ? 'border-red-500 bg-red-50' : 'border-yellow-500 bg-yellow-50'
-              }`}
-            >
-              {/* Header */}
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-start space-x-4 flex-1">
-                  <div className="mt-1">
-                    {getReportIcon(report.type)}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-3 mb-2">
-                      <h3 className="text-lg font-semibold text-gray-900">
-                        {getReportTypeLabel(report.type)}
-                      </h3>
-                      <span className="status-badge status-rejected">Rejected</span>
-                      {report.is_overdue && (
-                        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
-                          <AlertTriangle className="w-4 h-4 mr-1" />
-                          Overdue
-                        </span>
-                      )}
+      <div className="card">
+        {reports.length === 0 ? (
+          <div className="text-center py-12">
+            <XCircle className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+            <p className="text-gray-600 text-lg">No rejected reports</p>
+            <p className="text-gray-500 text-sm mt-2">Rejected reports will appear here</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {reports.map((report) => {
+              const Icon = getReportTypeIcon(report.type)
+              return (
+                <Link
+                  key={report.id}
+                  href={`/bdm/review/${report.type}/${report.id}`}
+                  className="block"
+                >
+                  <div className="flex items-start justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors border-l-4 border-red-500">
+                    <div className="flex items-start space-x-4 flex-1">
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${getReportTypeColor(report.type)} flex-shrink-0`}>
+                        {Icon}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center space-x-2 mb-1">
+                          <span className="font-semibold text-gray-900">{getReportTypeLabel(report.type)}</span>
+                          <XCircle className="w-4 h-4 text-red-500" />
+                        </div>
+                        <div className="text-sm text-gray-600 mb-2">
+                          {report.manager_name} • {format(new Date(report.report_date), 'MMM dd, yyyy')}
+                        </div>
+                        <div className="text-xs text-gray-500 mb-2">
+                          Rejected {format(new Date(report.reviewed_at), 'MMM dd, yyyy \'at\' h:mm a')}
+                        </div>
+                        <div className="p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                          <span className="font-medium">Reason: </span>
+                          {report.rejection_reason}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-3 flex-shrink-0 ml-4">
+                      <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm font-medium">
+                        Rejected
+                      </span>
                     </div>
                   </div>
-                </div>
-              </div>
-
-              {/* Report Info Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 text-sm">
-                <div className="flex items-center space-x-2 text-gray-600">
-                  <User className="w-4 h-4" />
-                  <span>{report.manager_name}</span>
-                </div>
-                <div className="flex items-center space-x-2 text-gray-600">
-                  <Calendar className="w-4 h-4" />
-                  <span>Report: {format(new Date(report.report_date), 'MMM dd, yyyy')}</span>
-                </div>
-                <div className="flex items-center space-x-2 text-gray-600">
-                  <XCircle className="w-4 h-4" />
-                  <span>Rejected: {format(new Date(report.rejected_at), 'MMM dd, yyyy h:mm a')}</span>
-                </div>
-                {report.resubmission_deadline && (
-                  <div className={`flex items-center space-x-2 ${report.is_overdue ? 'text-red-600 font-semibold' : 'text-yellow-600 font-semibold'}`}>
-                    <Clock className="w-4 h-4" />
-                    <span>Due: {format(new Date(report.resubmission_deadline), 'MMM dd, yyyy')}</span>
-                  </div>
-                )}
-              </div>
-
-              {report.total_amount !== undefined && (
-                <div className="mb-4 text-sm text-gray-600">
-                  <span className="font-semibold">Amount: ₦{report.total_amount.toFixed(2)}</span>
-                </div>
-              )}
-
-              {/* Rejection Details */}
-              <div className="space-y-3 mb-4">
-                <div className="bg-white p-4 rounded-lg">
-                  <div className="text-sm font-semibold text-red-600 mb-2 flex items-center">
-                    <AlertTriangle className="w-4 h-4 mr-2" />
-                    Rejection Reason:
-                  </div>
-                  <div className="text-sm text-gray-700">{report.rejection_reason}</div>
-                </div>
-
-                <div className="bg-white p-4 rounded-lg">
-                  <div className="text-sm font-semibold text-gray-700 mb-2">Instructions to Manager:</div>
-                  <div className="text-sm text-gray-700">{report.rejection_feedback}</div>
-                </div>
-
-                {report.notes && (
-                  <div className="bg-white p-4 rounded-lg">
-                    <div className="text-sm font-semibold text-gray-700 mb-2">Original Notes:</div>
-                    <div className="text-sm text-gray-700">{report.notes}</div>
-                  </div>
-                )}
-              </div>
-
-              {/* Action Button */}
-              <div className="flex justify-end">
-                <button
-                  onClick={() => handleViewReport(report)}
-                  className="btn-primary"
-                >
-                  View Full Report
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+                </Link>
+              )
+            })}
+          </div>
+        )}
+      </div>
     </div>
-  ) 
+  )
 }

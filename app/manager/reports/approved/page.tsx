@@ -32,8 +32,8 @@ export default function ManagerApprovedReportsPage() {
 
       const [stockData, salesData, expenseData] = await Promise.all([
         supabase
-          .from('stock_reports')
-          .select('*, reviewer:users!stock_reports_reviewed_by_fkey(full_name)')
+          .from('stock_inventory_reports')
+          .select('*, reviewer:users!stock_inventory_reports_reviewed_by_fkey(full_name)')
           .eq('manager_id', user.id)
           .eq('status', 'approved')
           .order('reviewed_at', { ascending: false }),
@@ -90,38 +90,27 @@ export default function ManagerApprovedReportsPage() {
 
   const getReportIcon = (type: string) => {
     switch (type) {
-      case 'stock':
-        return <Package className="w-5 h-5 text-blue-500" />
-      case 'sales':
-        return <DollarSign className="w-5 h-5 text-green-500" />
-      case 'expense':
-        return <FileText className="w-5 h-5 text-purple-500" />
+      case 'stock': return <Package className="w-5 h-5 text-blue-500" />
+      case 'sales': return <DollarSign className="w-5 h-5 text-green-500" />
+      case 'expense': return <FileText className="w-5 h-5 text-purple-500" />
     }
   }
 
   const getReportTypeLabel = (type: string) => {
     switch (type) {
-      case 'stock':
-        return 'Stock Report'
-      case 'sales':
-        return 'Sales Report'
-      case 'expense':
-        return 'Expense Report'
+      case 'stock': return 'Stock & Inventory Report'
+      case 'sales': return 'Sales Report'
+      case 'expense': return 'Expense Report'
     }
   }
 
+  // THE FIX: ?source=approved tells the view page to show "Back to Approved Reports"
   const handleViewReport = (report: ApprovedReport) => {
-    // You can create a dedicated view page or use a modal
-    // For now, navigate to a view page (you'll need to create this)
-    router.push(`/manager/reports/view/${report.type}/${report.id}`)
+    router.push(`/manager/reports/view/${report.type}/${report.id}?source=approved`)
   }
 
   if (loading) {
-    return (
-      <div className="p-8">
-        <div className="text-lg text-gray-600">Loading approved reports...</div>
-      </div>
-    )
+    return <div className="p-8"><div className="text-lg text-gray-600">Loading approved reports...</div></div>
   }
 
   return (
@@ -140,24 +129,20 @@ export default function ManagerApprovedReportsPage() {
       ) : (
         <div className="space-y-4">
           {reports.map((report) => (
-            <div 
-              key={report.id} 
+            <div
+              key={report.id}
               className="card hover:shadow-lg transition-all cursor-pointer border-l-4 border-green-500"
               onClick={() => handleViewReport(report)}
             >
               <div className="flex items-start justify-between">
                 <div className="flex items-start space-x-4 flex-1">
-                  <div className="mt-1">
-                    {getReportIcon(report.type)}
-                  </div>
+                  <div className="mt-1">{getReportIcon(report.type)}</div>
                   <div className="flex-1">
                     <div className="flex items-center space-x-3 mb-2">
-                      <h3 className="text-lg font-semibold text-gray-900">
-                        {getReportTypeLabel(report.type)}
-                      </h3>
+                      <h3 className="text-lg font-semibold text-gray-900">{getReportTypeLabel(report.type)}</h3>
                       <span className="status-badge status-approved">Approved</span>
                     </div>
-                    
+
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm text-gray-600">
                       <div className="flex items-center space-x-2">
                         <Calendar className="w-4 h-4" />

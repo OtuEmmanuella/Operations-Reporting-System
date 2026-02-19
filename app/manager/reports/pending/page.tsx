@@ -33,10 +33,9 @@ export default function ManagerPendingReportsPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      // Get both pending AND clarification_requested reports
       const [stockData, salesData, expenseData] = await Promise.all([
         supabase
-          .from('stock_reports')
+          .from('stock_inventory_reports')
           .select('*')
           .eq('manager_id', user.id)
           .in('status', ['pending', 'clarification_requested'])
@@ -103,39 +102,29 @@ export default function ManagerPendingReportsPage() {
 
   const getReportIcon = (type: string) => {
     switch (type) {
-      case 'stock':
-        return <Package className="w-5 h-5 text-blue-500" />
-      case 'sales':
-        return <DollarSign className="w-5 h-5 text-green-500" />
-      case 'expense':
-        return <FileText className="w-5 h-5 text-purple-500" />
+      case 'stock': return <Package className="w-5 h-5 text-blue-500" />
+      case 'sales': return <DollarSign className="w-5 h-5 text-green-500" />
+      case 'expense': return <FileText className="w-5 h-5 text-purple-500" />
     }
   }
 
   const getReportTypeLabel = (type: string) => {
     switch (type) {
-      case 'stock':
-        return 'Stock Report'
-      case 'sales':
-        return 'Sales Report'
-      case 'expense':
-        return 'Expense Report'
+      case 'stock': return 'Stock & Inventory Report'
+      case 'sales': return 'Sales Report'
+      case 'expense': return 'Expense Report'
     }
   }
 
+  // ✅ Pass source=pending so the view page knows where to go back
   const handleViewReport = (report: PendingReport) => {
-    router.push(`/manager/reports/view/${report.type}/${report.id}`)
+    router.push(`/manager/reports/view/${report.type}/${report.id}?source=pending`)
   }
 
   if (loading) {
-    return (
-      <div className="p-8">
-        <div className="text-lg text-gray-600">Loading pending reports...</div>
-      </div>
-    )
+    return <div className="p-8"><div className="text-lg text-gray-600">Loading pending reports...</div></div>
   }
 
-  const pendingCount = reports.filter(r => r.status === 'pending').length
   const clarificationCount = reports.filter(r => r.status === 'clarification_requested').length
 
   return (
@@ -145,7 +134,6 @@ export default function ManagerPendingReportsPage() {
         <p className="text-gray-600 mt-2">Reports awaiting BDM review or needing clarification</p>
       </div>
 
-      {/* Stats */}
       {clarificationCount > 0 && (
         <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-lg">
           <div className="flex items-center space-x-3">
@@ -154,9 +142,7 @@ export default function ManagerPendingReportsPage() {
               <div className="font-semibold text-orange-900">
                 {clarificationCount} Report{clarificationCount > 1 ? 's' : ''} Need{clarificationCount === 1 ? 's' : ''} Your Response
               </div>
-              <div className="text-sm text-orange-700">
-                BDM has requested clarification. Click to view and respond.
-              </div>
+              <div className="text-sm text-orange-700">BDM has requested clarification. Click to view and respond.</div>
             </div>
           </div>
         </div>
@@ -171,32 +157,26 @@ export default function ManagerPendingReportsPage() {
       ) : (
         <div className="space-y-4">
           {reports.map((report) => (
-            <div 
-              key={report.id} 
+            <div
+              key={report.id}
               className={`card hover:shadow-lg transition-all cursor-pointer border-l-4 ${
-                report.status === 'clarification_requested' 
-                  ? 'border-orange-500 bg-orange-50' 
+                report.status === 'clarification_requested'
+                  ? 'border-orange-500 bg-orange-50'
                   : 'border-yellow-500'
               }`}
               onClick={() => handleViewReport(report)}
             >
               <div className="flex items-start justify-between">
                 <div className="flex items-start space-x-4 flex-1">
-                  <div className="mt-1">
-                    {getReportIcon(report.type)}
-                  </div>
+                  <div className="mt-1">{getReportIcon(report.type)}</div>
                   <div className="flex-1">
                     <div className="flex items-center space-x-3 mb-2">
-                      <h3 className="text-lg font-semibold text-gray-900">
-                        {getReportTypeLabel(report.type)}
-                      </h3>
+                      <h3 className="text-lg font-semibold text-gray-900">{getReportTypeLabel(report.type)}</h3>
                       <span className={`status-badge status-${report.status}`}>
-                        {report.status === 'clarification_requested' 
-                          ? 'Clarification Requested' 
-                          : 'Pending Review'}
+                        {report.status === 'clarification_requested' ? 'Clarification Requested' : 'Pending Review'}
                       </span>
                     </div>
-                    
+
                     <div className="flex items-center space-x-4 text-sm text-gray-600 mb-2">
                       <div className="flex items-center space-x-2">
                         <Calendar className="w-4 h-4" />
@@ -214,7 +194,6 @@ export default function ManagerPendingReportsPage() {
                       </div>
                     )}
 
-                    {/* Show clarification preview */}
                     {report.status === 'clarification_requested' && report.clarification_request && (
                       <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
                         <div className="flex items-start space-x-2">

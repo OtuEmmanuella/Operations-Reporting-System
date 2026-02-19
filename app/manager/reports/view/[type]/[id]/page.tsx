@@ -1,579 +1,550 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter, useParams } from 'next/navigation'
-import { supabase, ClarificationMessage } from '@/lib/supabase'
-import { ArrowLeft, CheckCircle, XCircle, Calendar, User, Package, DollarSign, FileText, AlertTriangle, AlertCircle, Send, Clock, MessageCircle, Hotel, UserCheck, TrendingUp, MessageSquare } from 'lucide-react'
-import { format } from 'date-fns'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import { supabase } from '@/lib/supabase'
+import { ArrowLeft, CheckCircle, XCircle, Clock, AlertCircle, MessageCircle, Send } from 'lucide-react'
+import { format } from 'date-fns'
 
-interface ReportDetail {
-  id: string
-  manager_id: string
-  report_date: string
-  created_at: string
-  status: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
-  notes?: string
-  total_amount?: number
-  reviewed_at?: string
-  reviewed_by_name?: string
-  rejection_reason?: string
-  rejection_feedback?: string
-  resubmission_deadline?: string
-  clarification_thread?: ClarificationMessage[]
-  items?: any[]
-}
-
-export default function ManagerViewReportPage() {
-  const router = useRouter()
+export default function ViewReportPage() {
   const params = useParams()
-  const type = params.type as 'stock' | 'sales' | 'expense' | 'occupancy' | 'guest_activity' | 'revenue' | 'complaint'
-  const id = params.id as string
-
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [loading, setLoading] = useState(true)
-  const [report, setReport] = useState<ReportDetail | null>(null)
+  const [report, setReport] = useState<any>(null)
+  const [items, setItems] = useState<any[]>([])
   const [clarificationResponse, setClarificationResponse] = useState('')
-  const [submitting, setSubmitting] = useState(false)
+  const [submittingResponse, setSubmittingResponse] = useState(false)
+
+  const reportType = params.type as string
+  const reportId = params.id as string
+
+  // ✅ Read source from URL query param — set by whichever list page navigated here
+  const source = searchParams.get('source') // 'pending' | 'approved' | 'rejected' | null
+
+  const backLink = (() => {
+    switch (source) {
+      case 'approved': return { href: '/manager/reports/approved', label: 'Approved Reports' }
+      case 'rejected': return { href: '/manager/reports/rejected', label: 'Rejected Reports' }
+      case 'pending':
+      default:         return { href: '/manager/reports/pending', label: 'Pending Reports' }
+    }
+  })()
 
   useEffect(() => {
-    loadReportDetail()
-  }, [type, id])
+    loadReport()
+  }, [reportType, reportId])
 
-  const loadReportDetail = async () => {
+  const getTableNames = (type: string): { tableName: string; itemsTableName: string | null } => {
+    switch (type) {
+      case 'stock':
+      case 'stock_inventory':
+        return { tableName: 'stock_inventory_reports', itemsTableName: 'stock_inventory_items' }
+      case 'sales':
+        return { tableName: 'sales_reports', itemsTableName: 'sales_report_items' }
+      case 'expense':
+        return { tableName: 'expense_reports', itemsTableName: null }
+      default:
+        throw new Error(`Unknown report type: ${type}`)
+    }
+  }
+
+  const loadReport = async () => {
+    setLoading(true)
     try {
-      let query: any
-      let itemsQuery: any = null
+      const { tableName, itemsTableName } = getTableNames(reportType)
 
-      switch (type) {
-        case 'stock':
-          query = supabase
-            .from('stock_reports')
-            .select('*, reviewer:users!stock_reports_reviewed_by_fkey(full_name)')
-            .eq('id', id)
-            .single()
-          itemsQuery = supabase
-            .from('stock_report_items')
-            .select('*')
-            .eq('report_id', id)
-          break
-        case 'sales':
-          query = supabase
-            .from('sales_reports')
-            .select('*, reviewer:users!sales_reports_reviewed_by_fkey(full_name)')
-            .eq('id', id)
-            .single()
-          itemsQuery = supabase
-            .from('sales_report_items')
-            .select('*')
-            .eq('report_id', id)
-          break
-        case 'expense':
-          query = supabase
-            .from('expense_reports')
-            .select('*, reviewer:users!expense_reports_reviewed_by_fkey(full_name)')
-            .eq('id', id)
-            .single()
-          itemsQuery = supabase
-            .from('expense_report_items')
-            .select('*')
-            .eq('report_id', id)
-          break
-        case 'occupancy':
-          query = supabase
-            .from('occupancy_reports')
-            .select('*, reviewer:users!occupancy_reports_reviewed_by_fkey(full_name)')
-            .eq('id', id)
-            .single()
-          break
-        case 'guest_activity':
-          query = supabase
-            .from('guest_activity_reports')
-            .select('*, reviewer:users!guest_activity_reports_reviewed_by_fkey(full_name)')
-            .eq('id', id)
-            .single()
-          break
-        case 'revenue':
-          query = supabase
-            .from('revenue_reports')
-            .select('*, reviewer:users!revenue_reports_reviewed_by_fkey(full_name)')
-            .eq('id', id)
-            .single()
-          break
-        case 'complaint':
-          query = supabase
-            .from('complaint_reports')
-            .select('*, reviewer:users!complaint_reports_reviewed_by_fkey(full_name)')
-            .eq('id', id)
-            .single()
-          break
-      }
+      const { data: reportData, error: reportError } = await supabase
+        .from(tableName)
+        .select('*')
+        .eq('id', reportId)
+        .single()
 
-      const queries = itemsQuery ? [query, itemsQuery] : [query]
-      const results = await Promise.all(queries)
-      const reportData = results[0]
-      const itemsData = results[1] || { data: [] }
+      if (reportError) throw reportError
+      setReport(reportData)
 
-      if (reportData.data) {
-        setReport({
-          id: reportData.data.id,
-          manager_id: reportData.data.manager_id,
-          report_date: reportData.data.report_date,
-          created_at: reportData.data.created_at,
-          status: reportData.data.status,
-          notes: reportData.data.notes,
-          total_amount: reportData.data.total_amount || reportData.data.total_revenue,
-          reviewed_at: reportData.data.reviewed_at,
-          reviewed_by_name: reportData.data.reviewer?.full_name || 'BDM',
-          rejection_reason: reportData.data.rejection_reason,
-          rejection_feedback: reportData.data.rejection_feedback,
-          resubmission_deadline: reportData.data.resubmission_deadline,
-          clarification_thread: reportData.data.clarification_thread || [],
-          items: itemsData.data || [],
-        })
+      if (itemsTableName) {
+        const { data: itemsData } = await supabase
+          .from(itemsTableName)
+          .select('*')
+          .eq('report_id', reportId)
+        setItems(itemsData || [])
       }
     } catch (error) {
       console.error('Error loading report:', error)
+      alert('Error loading report. Please go back and try again.')
+      router.push('/manager/reports/pending')
     } finally {
       setLoading(false)
     }
   }
 
   const handleSubmitClarification = async () => {
-    if (!clarificationResponse.trim()) {
-      alert('Please enter your response before submitting')
-      return
-    }
-
-    setSubmitting(true)
+    if (!clarificationResponse.trim()) return
+    setSubmittingResponse(true)
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('No user found')
+      const { tableName } = getTableNames(reportType)
 
-      // Get user's full name
-      const { data: userData } = await supabase
-        .from('users')
-        .select('full_name')
-        .eq('id', user.id)
-        .single()
+      const existingThread = report.clarification_thread || []
+      const updatedThread = [
+        ...existingThread,
+        {
+          id: Date.now().toString(),
+          type: 'response',
+          content: clarificationResponse.trim(),
+          timestamp: new Date().toISOString(),
+        },
+      ]
 
-      // Create new response message
-      const newMessage: ClarificationMessage = {
-        id: crypto.randomUUID(),
-        type: 'response',
-        author_id: user.id,
-        author_name: userData?.full_name || 'Manager',
-        author_role: 'manager',
-        content: clarificationResponse,
-        timestamp: new Date().toISOString(),
-      }
-
-      // Append to existing thread
-      const updatedThread = [...(report?.clarification_thread || []), newMessage]
-
-      const tableName = `${type}_reports`
       const { error } = await supabase
-        .from(tableName as any)
+        .from(tableName)
         .update({
+          clarification_response: clarificationResponse.trim(),
+          clarification_responded_at: new Date().toISOString(),
           clarification_thread: updatedThread,
         })
-        .eq('id', id)
+        .eq('id', reportId)
 
       if (error) throw error
 
-      alert('Response submitted successfully! BDM will review your clarification.')
       setClarificationResponse('')
-      loadReportDetail() // Reload to show updated thread
-    } catch (error) {
-      console.error('Error submitting response:', error)
-      alert('Failed to submit response. Please try again.')
+      alert('Response submitted! The BDM will review your clarification.')
+      loadReport()
+    } catch (error: any) {
+      console.error('Error submitting clarification:', error)
+      alert('Error submitting response: ' + error.message)
     } finally {
-      setSubmitting(false)
+      setSubmittingResponse(false)
     }
   }
 
-  const getReportIcon = () => {
-    switch (type) {
-      case 'stock':
-        return <Package className="w-6 h-6 text-blue-500" />
-      case 'sales':
-        return <DollarSign className="w-6 h-6 text-green-500" />
-      case 'expense':
-        return <FileText className="w-6 h-6 text-purple-500" />
-      case 'occupancy':
-        return <Hotel className="w-6 h-6 text-indigo-500" />
-      case 'guest_activity':
-        return <UserCheck className="w-6 h-6 text-pink-500" />
-      case 'revenue':
-        return <TrendingUp className="w-6 h-6 text-emerald-500" />
-      case 'complaint':
-        return <MessageSquare className="w-6 h-6 text-red-500" />
+  const getStatusBadge = () => {
+    if (!report) return null
+    const statusConfig: Record<string, { icon: any; label: string; className: string }> = {
+      pending: { icon: Clock, label: 'Pending Review', className: 'bg-yellow-100 text-yellow-700 border-yellow-300' },
+      approved: { icon: CheckCircle, label: 'Approved', className: 'bg-green-100 text-green-700 border-green-300' },
+      rejected: { icon: XCircle, label: 'Rejected', className: 'bg-red-100 text-red-700 border-red-300' },
+      clarification_requested: { icon: AlertCircle, label: 'Clarification Needed', className: 'bg-orange-100 text-orange-700 border-orange-300' },
     }
+    const config = statusConfig[report.status] || statusConfig['pending']
+    const Icon = config.icon
+    return (
+      <div className={`inline-flex items-center px-4 py-2 rounded-lg border-2 ${config.className} font-semibold`}>
+        <Icon className="w-5 h-5 mr-2" />
+        {config.label}
+      </div>
+    )
   }
 
-  const getReportTitle = () => {
-    switch (type) {
-      case 'stock':
-        return 'Stock Report'
-      case 'sales':
-        return 'Sales Report'
-      case 'expense':
-        return 'Expense Report'
-      case 'occupancy':
-        return 'Occupancy Report'
-      case 'guest_activity':
-        return 'Guest Activity Report'
-      case 'revenue':
-        return 'Revenue Report'
-      case 'complaint':
-        return 'Complaint Report'
+  const getReportTypeLabel = () => {
+    const labels: Record<string, string> = {
+      stock: 'Stock & Inventory Report',
+      stock_inventory: 'Stock & Inventory Report',
+      sales: 'Sales Report',
+      expense: 'Expense Report',
     }
-  }
-
-  const getBackLink = () => {
-    if (report?.status === 'approved') return '/manager/reports/approved'
-    if (report?.status === 'rejected') return '/manager/reports/rejected'
-    if (report?.status === 'pending' || report?.status === 'clarification_requested') {
-      return '/manager/reports/pending'
-    }
-    return '/manager/dashboard'
-  }
-
-  // Check if the last message is a question (needs response)
-  const needsResponse = () => {
-    if (!report?.clarification_thread || report.clarification_thread.length === 0) return false
-    const lastMessage = report.clarification_thread[report.clarification_thread.length - 1]
-    return lastMessage.type === 'question' && report.status === 'clarification_requested'
-  }
-
-  // Has clarification history (show even if approved/rejected)
-  const hasClarificationHistory = () => {
-    return report?.clarification_thread && report.clarification_thread.length > 0
+    return labels[reportType] || 'Report'
   }
 
   if (loading) {
-    return (
-      <div className="p-8">
-        <div className="text-lg text-gray-600">Loading report details...</div>
-      </div>
-    )
+    return <div className="p-8"><div className="text-lg text-gray-600">Loading report...</div></div>
   }
 
   if (!report) {
-    return (
-      <div className="p-8">
-        <div className="text-lg text-red-600">Report not found</div>
-      </div>
-    )
+    return <div className="p-8"><div className="text-lg text-red-600">Report not found</div></div>
   }
 
+  // Parse payment breakdown from notes
+  let paymentBreakdown: any = null
+  let cleanNotes = report.notes || ''
+  if (report.notes && report.notes.includes('__PAYMENT_BREAKDOWN__')) {
+    const parts = report.notes.split('__PAYMENT_BREAKDOWN__\n')
+    cleanNotes = parts[0].trim()
+    try { paymentBreakdown = JSON.parse(parts[1]) } catch {}
+  }
+
+  const clarificationThread: any[] = report.clarification_thread || []
+  const legacyThread: any[] = []
+  if (clarificationThread.length === 0) {
+    if (report.clarification_request) {
+      legacyThread.push({ id: '1', type: 'question', content: report.clarification_request, timestamp: report.clarification_requested_at || report.created_at })
+    }
+    if (report.clarification_response) {
+      legacyThread.push({ id: '2', type: 'response', content: report.clarification_response, timestamp: report.clarification_responded_at || new Date().toISOString() })
+    }
+  }
+  const displayThread = clarificationThread.length > 0 ? clarificationThread : legacyThread
+  const lastMessage = displayThread[displayThread.length - 1]
+  const needsManagerResponse = report.status === 'clarification_requested' && (!lastMessage || lastMessage.type === 'question')
+
   return (
-    <div className="p-8">
-      {/* Header */}
-      <div className="mb-8">
-        <Link href={getBackLink()} className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-4">
+    <div className="p-8 max-w-5xl mx-auto">
+      <div className="mb-6">
+
+        {/* ✅ Breadcrumb always correct — driven by ?source= query param */}
+        <Link href={backLink.href} className="inline-flex items-center text-primary hover:text-primary-dark mb-4">
           <ArrowLeft className="w-4 h-4 mr-2" />
-          Back
+          Back to {backLink.label}
         </Link>
+
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            {getReportIcon()}
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">{getReportTitle()}</h1>
-              <p className="text-gray-600 mt-1">Report Details</p>
-            </div>
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">{getReportTypeLabel()}</h1>
+            <p className="text-gray-600 mt-2">Report Date: {format(new Date(report.report_date), 'MMMM dd, yyyy')}</p>
           </div>
-          <span className={`status-badge status-${report.status}`}>
-            {report.status === 'clarification_requested' 
-              ? 'Clarification Requested' 
-              : report.status.charAt(0).toUpperCase() + report.status.slice(1)}
-          </span>
+          {getStatusBadge()}
         </div>
       </div>
 
-      {/* Clarification Thread Section - SHOW FOR ALL STATUSES IF EXISTS */}
-      {hasClarificationHistory() && (
-        <div className={`mb-6 card ${
-          report.status === 'clarification_requested' 
-            ? 'bg-orange-50 border-orange-200' 
-            : 'bg-gray-50 border-gray-200'
-        }`}>
-          <div className="flex items-start space-x-3">
-            <MessageCircle className={`w-6 h-6 mt-1 ${
-              report.status === 'clarification_requested' ? 'text-orange-600' : 'text-gray-600'
-            }`} />
-            <div className="flex-1">
-              <h3 className={`text-lg font-semibold mb-3 ${
-                report.status === 'clarification_requested' ? 'text-orange-900' : 'text-gray-900'
-              }`}>
-                {report.status === 'clarification_requested' 
-                  ? 'Clarification Conversation' 
-                  : 'Clarification History'}
-              </h3>
-              
-              {/* Thread of messages */}
-              <div className="space-y-3 max-h-96 overflow-y-auto mb-4">
-                {report.clarification_thread!.map((message, index) => (
-                  <div
-                    key={message.id}
-                    className={`rounded-lg p-4 ${
-                      message.type === 'question'
-                        ? 'bg-blue-50 border border-blue-200'
-                        : 'bg-green-50 border border-green-200'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex items-center space-x-2">
-                        {message.type === 'question' ? (
-                          <AlertCircle className="w-4 h-4 text-blue-600" />
-                        ) : (
-                          <CheckCircle className="w-4 h-4 text-green-600" />
-                        )}
-                        <span className={`text-sm font-semibold ${
-                          message.type === 'question' ? 'text-blue-900' : 'text-green-900'
-                        }`}>
-                          {message.type === 'question' ? 'BDM\'s Question' : 'Your Response'}
-                          {message.author_name && ` (${message.author_name})`}
-                        </span>
-                      </div>
-                      <span className={`text-xs ${
-                        message.type === 'question' ? 'text-blue-600' : 'text-green-600'
-                      }`}>
-                        {format(new Date(message.timestamp), 'MMM dd, h:mm a')}
-                      </span>
-                    </div>
-                    <div className={`text-sm whitespace-pre-wrap ${
-                      message.type === 'question' ? 'text-blue-800' : 'text-green-800'
+      {/* ── CLARIFICATION SECTION ── */}
+      {(displayThread.length > 0 || report.status === 'clarification_requested') && (
+        <div className="card bg-orange-50 border-orange-200 mb-6">
+          <h2 className="text-xl font-bold text-orange-900 mb-4 flex items-center">
+            <MessageCircle className="w-6 h-6 mr-2" />
+            Clarification Conversation
+          </h2>
+
+          {displayThread.length > 0 && (
+            <div className="space-y-3 mb-4">
+              {displayThread.map((message: any) => (
+                <div
+                  key={message.id}
+                  className={`p-4 rounded-lg ${
+                    message.type === 'question'
+                      ? 'bg-blue-50 border-l-4 border-blue-500'
+                      : 'bg-green-50 border-l-4 border-green-500 ml-4'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                      message.type === 'question' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
                     }`}>
-                      {message.content}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Response Input (if last message is a question AND status is clarification_requested) */}
-              {needsResponse() && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Your Response:
-                  </label>
-                  <textarea
-                    value={clarificationResponse}
-                    onChange={(e) => setClarificationResponse(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent resize-none"
-                    rows={4}
-                    placeholder="Provide your clarification here while viewing the report details below..."
-                  />
-                  <button
-                    onClick={handleSubmitClarification}
-                    disabled={submitting || !clarificationResponse.trim()}
-                    className="mt-3 px-6 py-2 bg-orange-600 text-white rounded-lg font-medium hover:bg-orange-700 transition-colors flex items-center space-x-2 disabled:opacity-50"
-                  >
-                    {submitting ? (
-                      <>
-                        <Clock className="w-4 h-4 animate-spin" />
-                        <span>Submitting...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Send className="w-4 h-4" />
-                        <span>Submit Response</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              )}
-
-              {/* Already responded indicator OR Resolved status */}
-              {report.status === 'clarification_requested' && 
-               !needsResponse() && 
-               report.clarification_thread![report.clarification_thread!.length - 1].type === 'response' && (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                  <div className="flex items-center space-x-2 text-sm text-green-800">
-                    <CheckCircle className="w-4 h-4" />
-                    <span>Response submitted. Waiting for BDM to review...</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Show resolution status for approved/rejected */}
-              {(report.status === 'approved' || report.status === 'rejected') && hasClarificationHistory() && (
-                <div className={`${
-                  report.status === 'approved' 
-                    ? 'bg-green-50 border border-green-200' 
-                    : 'bg-red-50 border border-red-200'
-                } rounded-lg p-3`}>
-                  <div className="flex items-center space-x-2 text-sm">
-                    {report.status === 'approved' ? (
-                      <>
-                        <CheckCircle className="w-4 h-4 text-green-600" />
-                        <span className="text-green-800 font-medium">
-                          Report was approved after clarification discussion
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <XCircle className="w-4 h-4 text-red-600" />
-                        <span className="text-red-800 font-medium">
-                          Report was rejected after clarification discussion
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Report Info Cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        <div className="card">
-          <div className="flex items-center space-x-3">
-            <Calendar className="w-5 h-5 text-gray-400" />
-            <div>
-              <div className="text-sm text-gray-600">Report Date</div>
-              <div className="font-semibold text-gray-900">{format(new Date(report.report_date), 'MMM dd, yyyy')}</div>
-            </div>
-          </div>
-        </div>
-        <div className="card">
-          <div className="flex items-center space-x-3">
-            <Calendar className="w-5 h-5 text-gray-400" />
-            <div>
-              <div className="text-sm text-gray-600">Submitted On</div>
-              <div className="font-semibold text-gray-900">{format(new Date(report.created_at), 'MMM dd, yyyy h:mm a')}</div>
-            </div>
-          </div>
-        </div>
-        {report.reviewed_at && (
-          <div className="card">
-            <div className="flex items-center space-x-3">
-              <User className="w-5 h-5 text-gray-400" />
-              <div>
-                <div className="text-sm text-gray-600">Reviewed By</div>
-                <div className="font-semibold text-gray-900">{report.reviewed_by_name}</div>
-                <div className="text-xs text-gray-500">{format(new Date(report.reviewed_at), 'MMM dd, yyyy')}</div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Rejection Details (if rejected) */}
-      {report.status === 'rejected' && (
-        <div className="mb-6 card bg-red-50 border-red-200">
-          <div className="flex items-start space-x-3">
-            <XCircle className="w-6 h-6 text-red-600 mt-1" />
-            <div className="flex-1">
-              <h3 className="text-lg font-semibold text-red-900 mb-3">Report Rejected</h3>
-              
-              {report.resubmission_deadline && (
-                <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                  <div className="flex items-center space-x-2 text-sm text-yellow-800">
-                    <AlertTriangle className="w-4 h-4" />
-                    <span className="font-medium">
-                      Resubmit by: {format(new Date(report.resubmission_deadline), 'MMM dd, yyyy')}
+                      {message.type === 'question' ? '🔵 BDM Question' : '✅ Your Response'}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {format(new Date(message.timestamp), 'MMM dd, yyyy h:mm a')}
                     </span>
                   </div>
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap">{message.content}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {needsManagerResponse && (
+            <div className="mt-4 pt-4 border-t border-orange-200">
+              <label className="block text-sm font-bold text-orange-900 mb-2">✍️ Your Response to the BDM</label>
+              <textarea
+                value={clarificationResponse}
+                onChange={(e) => setClarificationResponse(e.target.value)}
+                rows={4}
+                className="w-full border border-orange-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
+                placeholder="Type your clarification response here..."
+              />
+              <div className="mt-3 flex items-center gap-3">
+                <button
+                  onClick={handleSubmitClarification}
+                  disabled={submittingResponse || !clarificationResponse.trim()}
+                  className="flex items-center space-x-2 px-5 py-2.5 bg-orange-600 text-white rounded-lg font-semibold hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>{submittingResponse ? 'Submitting...' : 'Submit Response'}</span>
+                </button>
+                <span className="text-xs text-gray-500">The BDM will be notified of your response</span>
+              </div>
+            </div>
+          )}
+
+          {report.status === 'clarification_requested' && lastMessage?.type === 'response' && (
+            <div className="mt-4 pt-4 border-t border-orange-200">
+              <div className="flex items-center space-x-2 text-green-700 bg-green-50 px-4 py-2 rounded-lg">
+                <CheckCircle className="w-4 h-4" />
+                <span className="text-sm font-medium">You've responded — waiting for BDM to review and decide.</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── STOCK & INVENTORY REPORT ── */}
+      {(reportType === 'stock' || reportType === 'stock_inventory') && (
+        <div className="space-y-6">
+          {items.filter(i => i.item_section === 'previous_stock').length > 0 && (
+            <div className="card">
+              <h2 className="text-xl font-bold text-blue-900 mb-4">1. Previous Day's Closing Stock</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-blue-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Item</th>
+                      <th className="px-4 py-2 text-right text-sm font-semibold text-gray-700">Quantity</th>
+                      <th className="px-4 py-2 text-right text-sm font-semibold text-gray-700">Unit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.filter(i => i.item_section === 'previous_stock').map((item, index) => (
+                      <tr key={index} className="border-t">
+                        <td className="px-4 py-2 text-sm text-gray-900">{item.item_name}</td>
+                        <td className="px-4 py-2 text-sm text-right text-gray-900">{item.quantity}</td>
+                        <td className="px-4 py-2 text-sm text-right text-gray-600">{item.unit}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {items.filter(i => i.item_section === 'new_stock').length > 0 && (
+            <div className="card">
+              <h2 className="text-xl font-bold text-green-900 mb-4">2. New Stock Received</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-green-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Item</th>
+                      <th className="px-4 py-2 text-right text-sm font-semibold text-gray-700">Quantity</th>
+                      <th className="px-4 py-2 text-right text-sm font-semibold text-gray-700">Unit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.filter(i => i.item_section === 'new_stock').map((item, index) => (
+                      <tr key={index} className="border-t">
+                        <td className="px-4 py-2 text-sm text-gray-900">{item.item_name}</td>
+                        <td className="px-4 py-2 text-sm text-right text-gray-900">{item.quantity}</td>
+                        <td className="px-4 py-2 text-sm text-right text-gray-600">{item.unit}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {items.filter(i => i.item_section === 'sales').length > 0 && (
+            <div className="card">
+              <h2 className="text-xl font-bold text-orange-900 mb-4">3. Sales</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-orange-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Item</th>
+                      <th className="px-4 py-2 text-right text-sm font-semibold text-gray-700">Qty Sold</th>
+                      <th className="px-4 py-2 text-right text-sm font-semibold text-gray-700">Unit Price</th>
+                      <th className="px-4 py-2 text-right text-sm font-semibold text-gray-700">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.filter(i => i.item_section === 'sales').map((item, index) => (
+                      <tr key={index} className="border-t">
+                        <td className="px-4 py-2 text-sm text-gray-900">{item.item_name}</td>
+                        <td className="px-4 py-2 text-sm text-right text-gray-900">{item.quantity}</td>
+                        <td className="px-4 py-2 text-sm text-right text-gray-900">₦{item.unit_price?.toLocaleString()}</td>
+                        <td className="px-4 py-2 text-sm text-right font-semibold text-gray-900">
+                          ₦{((item.quantity || 0) * (item.unit_price || 0)).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-orange-600 text-white font-bold">
+                      <td colSpan={3} className="px-4 py-3 text-right">Total Sales Revenue</td>
+                      <td className="px-4 py-3 text-right">
+                        ₦{items
+                          .filter(i => i.item_section === 'sales')
+                          .reduce((sum, i) => sum + (i.quantity || 0) * (i.unit_price || 0), 0)
+                          .toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
+
+          <div className="card">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Payment Methods</h2>
+            <div className="space-y-2">
+              <div className="flex justify-between p-2 bg-gray-50 rounded">
+                <span className="text-gray-700">Cash</span>
+                <span className="font-semibold text-gray-900">₦{(report.cash_payments || 0).toLocaleString()}</span>
+              </div>
+              {paymentBreakdown?.card_breakdown?.length > 0 ? (
+                paymentBreakdown.card_breakdown.map((p: any, i: number) => (
+                  <div key={i} className="flex justify-between p-2 bg-blue-50 rounded pl-6 text-sm">
+                    <span className="text-blue-700">↳ {p.bank} (Card/POS)</span>
+                    <span className="font-semibold text-blue-900">₦{p.amount.toLocaleString()}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="flex justify-between p-2 bg-gray-50 rounded">
+                  <span className="text-gray-700">Card/POS</span>
+                  <span className="font-semibold text-gray-900">₦{(report.card_payments || 0).toLocaleString()}</span>
                 </div>
               )}
-
-              <div className="space-y-3">
-                <div>
-                  <div className="text-sm font-medium text-red-900 mb-1">Rejection Reason:</div>
-                  <div className="text-sm text-red-800">{report.rejection_reason || 'No reason provided'}</div>
+              {paymentBreakdown?.transfer_breakdown?.length > 0 ? (
+                paymentBreakdown.transfer_breakdown.map((p: any, i: number) => (
+                  <div key={i} className="flex justify-between p-2 bg-purple-50 rounded pl-6 text-sm">
+                    <span className="text-purple-700">↳ {p.bank} (Transfer)</span>
+                    <span className="font-semibold text-purple-900">₦{p.amount.toLocaleString()}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="flex justify-between p-2 bg-gray-50 rounded">
+                  <span className="text-gray-700">Transfer</span>
+                  <span className="font-semibold text-gray-900">₦{(report.transfer_payments || 0).toLocaleString()}</span>
                 </div>
-                <div>
-                  <div className="text-sm font-medium text-red-900 mb-1">Feedback:</div>
-                  <div className="text-sm text-red-800">{report.rejection_feedback || 'No feedback provided'}</div>
-                </div>
+              )}
+              <div className="flex justify-between p-3 bg-gray-900 text-white rounded font-bold">
+                <span>Total Payments</span>
+                <span>₦{((report.cash_payments || 0) + (report.card_payments || 0) + (report.transfer_payments || 0)).toLocaleString()}</span>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Report Details */}
-      <div className="card mb-6">
-        <h2 className="text-xl font-bold text-gray-900 mb-4">Report Details</h2>
-        
-        {report.total_amount !== undefined && (
-          <div className="mb-4 p-4 bg-gray-50 rounded-lg">
-            <div className="text-sm text-gray-600">Total Amount</div>
-            <div className="text-2xl font-bold text-gray-900">₦{report.total_amount.toFixed(2)}</div>
-          </div>
-        )}
-
-        {report.notes && (
-          <div className="mb-4">
-            <div className="text-sm font-medium text-gray-700 mb-2">Notes:</div>
-            <div className="p-4 bg-gray-50 rounded-lg text-gray-700">{report.notes}</div>
-          </div>
-        )}
-
-        {/* Items Table (only for stock, sales, expense) */}
-        {report.items && report.items.length > 0 && (
-          <div>
-            <div className="text-sm font-medium text-gray-700 mb-2">Items:</div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    {type === 'stock' && (
-                      <>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Item Name</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
-                      </>
-                    )}
-                    {type === 'sales' && (
-                      <>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit Price</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
-                      </>
-                    )}
-                    {type === 'expense' && (
-                      <>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Item</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
-                      </>
-                    )}
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {report.items.map((item: any, index: number) => (
-                    <tr key={index}>
-                      {type === 'stock' && (
-                        <>
-                          <td className="px-6 py-4 text-sm text-gray-900">{item.item_name}</td>
-                          <td className="px-6 py-4 text-sm text-gray-900">{item.quantity}</td>
-                          <td className="px-6 py-4 text-sm text-gray-900">{item.unit}</td>
-                        </>
-                      )}
-                      {type === 'sales' && (
-                        <>
-                          <td className="px-6 py-4 text-sm text-gray-900">{item.product_name}</td>
-                          <td className="px-6 py-4 text-sm text-gray-900">{item.quantity}</td>
-                          <td className="px-6 py-4 text-sm text-gray-900">₦{item.unit_price.toFixed(2)}</td>
-                          <td className="px-6 py-4 text-sm font-semibold text-gray-900">₦{item.total_price.toFixed(2)}</td>
-                        </>
-                      )}
-                      {type === 'expense' && (
-                        <>
-                          <td className="px-6 py-4 text-sm text-gray-900">{item.item_name}</td>
-                          <td className="px-6 py-4 text-sm text-gray-900">{item.quantity}</td>
-                        </>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      {/* ── SALES REPORT ── */}
+      {reportType === 'sales' && (
+        <div className="space-y-6">
+          <div className="card">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Sales Summary</h2>
+            <div className="text-3xl font-bold text-green-600">
+              ₦{report.total_amount?.toLocaleString('en-NG', { minimumFractionDigits: 2 }) || '0.00'}
             </div>
           </div>
-        )}
+          {items.length > 0 && (
+            <div className="card">
+              <h2 className="text-xl font-bold text-gray-900 mb-4">Items Sold</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Product</th>
+                      <th className="px-4 py-2 text-right text-sm font-semibold text-gray-700">Quantity</th>
+                      <th className="px-4 py-2 text-right text-sm font-semibold text-gray-700">Unit Price</th>
+                      <th className="px-4 py-2 text-right text-sm font-semibold text-gray-700">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((item, index) => (
+                      <tr key={index} className="border-t">
+                        <td className="px-4 py-2 text-sm text-gray-900">{item.product_name}</td>
+                        <td className="px-4 py-2 text-sm text-right text-gray-900">{item.quantity}</td>
+                        <td className="px-4 py-2 text-sm text-right text-gray-900">₦{item.unit_price?.toLocaleString()}</td>
+                        <td className="px-4 py-2 text-sm text-right font-semibold text-gray-900">₦{item.total_price?.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── EXPENSE REPORT ── */}
+      {reportType === 'expense' && (
+        <div className="card">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">Expense Details</h2>
+          {report.total_amount && (
+            <div className="text-3xl font-bold text-purple-600 mb-4">
+              ₦{report.total_amount?.toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Notes */}
+      {cleanNotes && (
+        <div className="card mt-6">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">Notes</h2>
+          <p className="text-gray-700 whitespace-pre-wrap">{cleanNotes}</p>
+        </div>
+      )}
+
+      {/* Rejection Reason */}
+      {report.status === 'rejected' && report.rejection_reason && (
+        <div className="card bg-red-50 border-red-200 mt-6">
+          <h2 className="text-xl font-bold text-red-900 mb-4 flex items-center">
+            <XCircle className="w-6 h-6 mr-2" />
+            Rejection Reason
+          </h2>
+          <p className="text-red-700">{report.rejection_reason}</p>
+          {report.rejection_feedback && (
+            <div className="mt-3 pt-3 border-t border-red-200">
+              <div className="font-semibold text-red-900 mb-1">Feedback:</div>
+              <p className="text-red-700">{report.rejection_feedback}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Timeline */}
+      <div className="card mt-6">
+        <h2 className="text-xl font-bold text-gray-900 mb-4">Timeline</h2>
+        <div className="space-y-3">
+          <div className="flex items-start space-x-3">
+            <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+              <Clock className="w-4 h-4 text-blue-600" />
+            </div>
+            <div>
+              <div className="font-semibold text-gray-900">Submitted</div>
+              <div className="text-sm text-gray-600">{format(new Date(report.created_at), "MMMM dd, yyyy 'at' h:mm a")}</div>
+            </div>
+          </div>
+
+          {(report.clarification_requested_at || (report.status === 'clarification_requested' && displayThread.length > 0)) && (
+            <div className="flex items-start space-x-3">
+              <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <AlertCircle className="w-4 h-4 text-orange-600" />
+              </div>
+              <div>
+                <div className="font-semibold text-gray-900">BDM Requested Clarification</div>
+                {report.clarification_requested_at && (
+                  <div className="text-sm text-gray-600">{format(new Date(report.clarification_requested_at), "MMMM dd, yyyy 'at' h:mm a")}</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {report.clarification_responded_at && (
+            <div className="flex items-start space-x-3">
+              <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <MessageCircle className="w-4 h-4 text-green-600" />
+              </div>
+              <div>
+                <div className="font-semibold text-gray-900">You Responded</div>
+                <div className="text-sm text-gray-600">{format(new Date(report.clarification_responded_at), "MMMM dd, yyyy 'at' h:mm a")}</div>
+              </div>
+            </div>
+          )}
+
+          {report.status === 'approved' && report.reviewed_at && (
+            <div className="flex items-start space-x-3">
+              <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <CheckCircle className="w-4 h-4 text-green-600" />
+              </div>
+              <div>
+                <div className="font-semibold text-gray-900">Approved</div>
+                <div className="text-sm text-gray-600">{format(new Date(report.reviewed_at), "MMMM dd, yyyy 'at' h:mm a")}</div>
+              </div>
+            </div>
+          )}
+
+          {report.status === 'rejected' && report.reviewed_at && (
+            <div className="flex items-start space-x-3">
+              <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <XCircle className="w-4 h-4 text-red-600" />
+              </div>
+              <div>
+                <div className="font-semibold text-gray-900">Rejected</div>
+                <div className="text-sm text-gray-600">{format(new Date(report.reviewed_at), "MMMM dd, yyyy 'at' h:mm a")}</div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
