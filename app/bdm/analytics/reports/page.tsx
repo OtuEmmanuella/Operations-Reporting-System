@@ -106,13 +106,12 @@ export default function ReportIntelligencePage() {
 
       // By type analysis
       const reportTypes = [
-        { type: 'stock', label: 'Stock Reports', icon: Package },
-        { type: 'sales', label: 'Sales Reports', icon: DollarSign },
-        { type: 'expense', label: 'Expense Reports', icon: FileText },
-        { type: 'occupancy', label: 'Occupancy Reports', icon: Hotel },
-        { type: 'guest_activity', label: 'Guest Activity', icon: UsersIcon },
-        { type: 'revenue', label: 'Revenue Reports', icon: TrendingUp },
-        { type: 'complaint', label: 'Complaints', icon: MessageSquare },
+        { type: 'stock_inventory', label: 'Stock & Sales Reports', icon: Package },
+        { type: 'expense',         label: 'Expense Reports',       icon: FileText },
+        { type: 'occupancy',       label: 'Occupancy Reports',     icon: Hotel },
+        { type: 'guest_activity',  label: 'Guest Activity',        icon: UsersIcon },
+        { type: 'revenue',         label: 'Revenue Reports',       icon: TrendingUp },
+        { type: 'complaint',       label: 'Complaints',            icon: MessageSquare },
       ]
 
       const byType = reportTypes.map(rt => {
@@ -182,17 +181,15 @@ export default function ReportIntelligencePage() {
 
   const loadAllReports = async (startDate: string, endDate: string) => {
     const tables = [
-      { table: 'stock_reports', type: 'stock' },
-      { table: 'sales_reports', type: 'sales' },
-      { table: 'expense_reports', type: 'expense' },
-      { table: 'occupancy_reports', type: 'occupancy' },
-      { table: 'guest_activity_reports', type: 'guest_activity' },
-      { table: 'revenue_reports', type: 'revenue' },
-      { table: 'complaint_reports', type: 'complaint' },
+      { table: 'stock_inventory_reports', type: 'stock_inventory' },
+      { table: 'expense_reports',         type: 'expense' },
+      { table: 'occupancy_reports',       type: 'occupancy' },
+      { table: 'guest_activity_reports',  type: 'guest_activity' },
+      { table: 'revenue_reports',         type: 'revenue' },
+      { table: 'complaint_reports',       type: 'complaint' },
     ]
-    
     const results = await Promise.all(
-      tables.map(({ table, type }) => 
+      tables.map(({ table, type }) =>
         supabase
           .from(table as any)
           .select('*')
@@ -201,7 +198,6 @@ export default function ReportIntelligencePage() {
           .then(({ data }) => (data || []).map(r => ({ ...r, type })))
       )
     )
-    
     return results.flat()
   }
 

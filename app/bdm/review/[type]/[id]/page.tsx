@@ -3,11 +3,16 @@
 import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { supabase, ClarificationMessage } from '@/lib/supabase'
-import { ArrowLeft, CheckCircle, XCircle, AlertCircle, Calendar, User, Package, DollarSign, FileText, Clock, MessageCircle, Hotel, UserCheck, TrendingUp, MessageSquare } from 'lucide-react'
+import {
+  ArrowLeft, CheckCircle, XCircle, AlertCircle, Calendar, User, Package,
+  DollarSign, FileText, Clock, MessageCircle, Hotel, UserCheck, TrendingUp,
+  MessageSquare
+} from 'lucide-react'
 import { format } from 'date-fns'
 import Link from 'next/link'
 
-type ReportType = 'stock' | 'sales' | 'expense' | 'occupancy' | 'guest_activity' | 'revenue' | 'complaint'
+// stock_inventory covers the unified daily stock+sales report managers submit
+type ReportType = 'stock_inventory' | 'expense' | 'occupancy' | 'guest_activity' | 'revenue' | 'complaint'
 
 interface ReportDetail {
   id: string
@@ -24,7 +29,6 @@ interface ReportDetail {
   resubmission_deadline?: string
   reviewed_at?: string
   clarification_thread?: ClarificationMessage[]
-  // Front office specific
   extra_fields?: Record<string, any>
 }
 
@@ -33,30 +37,24 @@ const formatCurrency = (amount: number | null | undefined) => {
   return `₦${amount.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+// Maps URL param type → actual Supabase table
 const TABLE_MAP: Record<ReportType, string> = {
-  stock: 'stock_reports',
-  sales: 'sales_reports',
-  expense: 'expense_reports',
-  occupancy: 'occupancy_reports',
-  guest_activity: 'guest_activity_reports',
-  revenue: 'revenue_reports',
-  complaint: 'complaint_reports',
+  stock_inventory: 'stock_inventory_reports',
+  expense:         'expense_reports',
+  occupancy:       'occupancy_reports',
+  guest_activity:  'guest_activity_reports',
+  revenue:         'revenue_reports',
+  complaint:       'complaint_reports',
 }
 
-const ITEMS_TABLE_MAP: Record<string, string> = {
-  stock: 'stock_report_items',
-  sales: 'sales_report_items',
-  expense: 'expense_report_items',
-}
-
+// Foreign key aliases for manager join
 const FKEY_MAP: Record<ReportType, string> = {
-  stock: 'users!stock_reports_manager_id_fkey(full_name, role)',
-  sales: 'users!sales_reports_manager_id_fkey(full_name, role)',
-  expense: 'users!expense_reports_manager_id_fkey(full_name, role)',
-  occupancy: 'users!occupancy_reports_manager_id_fkey(full_name, role)',
-  guest_activity: 'users!guest_activity_reports_manager_id_fkey(full_name, role)',
-  revenue: 'users!revenue_reports_manager_id_fkey(full_name, role)',
-  complaint: 'users!complaint_reports_manager_id_fkey(full_name, role)',
+  stock_inventory: 'users!stock_inventory_reports_manager_id_fkey(full_name, role)',
+  expense:         'users!expense_reports_manager_id_fkey(full_name, role)',
+  occupancy:       'users!occupancy_reports_manager_id_fkey(full_name, role)',
+  guest_activity:  'users!guest_activity_reports_manager_id_fkey(full_name, role)',
+  revenue:         'users!revenue_reports_manager_id_fkey(full_name, role)',
+  complaint:       'users!complaint_reports_manager_id_fkey(full_name, role)',
 }
 
 export default function ReviewReportPage() {
@@ -74,8 +72,7 @@ export default function ReviewReportPage() {
   const [resubmissionDeadline, setResubmissionDeadline] = useState('')
   const [clarificationRequest, setClarificationRequest] = useState('')
   const [processing, setProcessing] = useState(false)
-  // Items only for store manager report types
-  const [items, setItems] = useState<any[]>([])
+  const [stockItems, setStockItems] = useState<any[]>([])
 
   useEffect(() => { loadReportDetail() }, [type, id])
 
@@ -91,14 +88,14 @@ export default function ReviewReportPage() {
 
       if (error) throw error
 
-      // Load items for store manager types
-      if (['stock', 'sales', 'expense'].includes(type)) {
-        const itemsTable = ITEMS_TABLE_MAP[type] as any
+      // Load line items for the unified stock+sales report
+      if (type === 'stock_inventory') {
         const { data: itemsData } = await supabase
-          .from(itemsTable)
+          .from('stock_inventory_items')
           .select('*')
           .eq('report_id', id)
-        setItems(itemsData || [])
+          .order('item_section')
+        setStockItems(itemsData || [])
       }
 
       const extra: Record<string, any> = {}
@@ -132,6 +129,10 @@ export default function ReviewReportPage() {
         extra.severity = reportData.severity
         extra.resolution_status = reportData.resolution_status
         extra.resolution_details = reportData.resolution_details
+      } else if (type === 'stock_inventory') {
+        extra.cash_payments = reportData.cash_payments
+        extra.card_payments = reportData.card_payments
+        extra.transfer_payments = reportData.transfer_payments
       }
 
       setReport({
@@ -242,7 +243,6 @@ export default function ReviewReportPage() {
     }
   }
 
-  // Determine which page this report came from for the back link
   const getBackLink = () => {
     if (!report) return { href: '/bdm/pending', label: 'Back to Pending Reports' }
     switch (report.status) {
@@ -254,33 +254,31 @@ export default function ReviewReportPage() {
 
   const getReportIcon = () => {
     switch (type) {
-      case 'stock': return <Package className="w-6 h-6 text-blue-500" />
-      case 'sales': return <DollarSign className="w-6 h-6 text-green-500" />
-      case 'expense': return <FileText className="w-6 h-6 text-purple-500" />
-      case 'occupancy': return <Hotel className="w-6 h-6 text-indigo-500" />
-      case 'guest_activity': return <UserCheck className="w-6 h-6 text-pink-500" />
-      case 'revenue': return <TrendingUp className="w-6 h-6 text-emerald-500" />
-      case 'complaint': return <MessageSquare className="w-6 h-6 text-red-500" />
+      case 'stock_inventory': return <Package className="w-6 h-6 text-blue-500" />
+      case 'expense':         return <FileText className="w-6 h-6 text-purple-500" />
+      case 'occupancy':       return <Hotel className="w-6 h-6 text-indigo-500" />
+      case 'guest_activity':  return <UserCheck className="w-6 h-6 text-pink-500" />
+      case 'revenue':         return <TrendingUp className="w-6 h-6 text-emerald-500" />
+      case 'complaint':       return <MessageSquare className="w-6 h-6 text-red-500" />
     }
   }
 
   const getReportTitle = () => {
     switch (type) {
-      case 'stock': return 'Stock Report'
-      case 'sales': return 'Sales Report'
-      case 'expense': return 'Expense Report'
-      case 'occupancy': return 'Occupancy Report'
-      case 'guest_activity': return 'Guest Activity Report'
-      case 'revenue': return 'Revenue Report'
-      case 'complaint': return 'Complaint Report'
+      case 'stock_inventory': return 'Stock & Sales Report'
+      case 'expense':         return 'Expense Report'
+      case 'occupancy':       return 'Occupancy Report'
+      case 'guest_activity':  return 'Guest Activity Report'
+      case 'revenue':         return 'Revenue Report'
+      case 'complaint':       return 'Complaint Report'
     }
   }
 
   const getStatusLabel = (status: string) => {
     switch (status) {
-      case 'pending': return 'Pending Review'
-      case 'approved': return 'Approved'
-      case 'rejected': return 'Rejected'
+      case 'pending':                return 'Pending Review'
+      case 'approved':               return 'Approved'
+      case 'rejected':               return 'Rejected'
       case 'clarification_requested': return 'Clarification Requested'
       default: return status
     }
@@ -291,28 +289,72 @@ export default function ReviewReportPage() {
     return report.clarification_thread[report.clarification_thread.length - 1].type === 'response'
   }
 
-  const showActionButtons = report?.status === 'pending' ||
+  const showActionButtons =
+    report?.status === 'pending' ||
     (report?.status === 'clarification_requested' && hasUnreadResponse())
 
   const backLink = getBackLink()
+  const ef = report?.extra_fields || {}
+
+  // Parse optional payment breakdown from notes field
+  const parsePaymentBreakdown = (notes?: string) => {
+    if (!notes) return null
+    const marker = '__PAYMENT_BREAKDOWN__'
+    const idx = notes.indexOf(marker)
+    if (idx === -1) return null
+    try {
+      return JSON.parse(notes.slice(idx + marker.length).trim())
+    } catch { return null }
+  }
+
+  const cleanNotes = (notes?: string) => {
+    if (!notes) return ''
+    const idx = notes.indexOf('__PAYMENT_BREAKDOWN__')
+    return idx === -1 ? notes : notes.slice(0, idx).trim()
+  }
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case 'critical': return 'bg-red-100 text-red-800'
-      case 'high': return 'bg-orange-100 text-orange-800'
-      case 'medium': return 'bg-yellow-100 text-yellow-800'
-      default: return 'bg-green-100 text-green-800'
+      case 'high':     return 'bg-orange-100 text-orange-800'
+      case 'medium':   return 'bg-yellow-100 text-yellow-800'
+      default:         return 'bg-green-100 text-green-800'
     }
   }
 
   if (loading) return <div className="p-8"><div className="text-lg text-gray-600">Loading report details...</div></div>
-  if (!report) return <div className="p-8"><div className="text-lg text-red-600">Report not found</div></div>
+  if (!report)  return <div className="p-8"><div className="text-lg text-red-600">Report not found</div></div>
 
-  const ef = report.extra_fields || {}
+  const paymentBreakdown = type === 'stock_inventory' ? parsePaymentBreakdown(report.notes) : null
+  const visibleNotes = type === 'stock_inventory' ? cleanNotes(report.notes) : report.notes
+
+  const previousStockItems = stockItems.filter(i => i.item_section === 'previous_stock')
+  const newStockItems      = stockItems.filter(i => i.item_section === 'new_stock')
+  const salesItems         = stockItems.filter(i => i.item_section === 'sales')
+
+  // Build unified stock rows from previous + new arrays (keyed by item_name)
+  const stockRows = previousStockItems.map(prev => {
+    const newItem = newStockItems.find(n => n.item_name === prev.item_name)
+    return {
+      item_name: prev.item_name,
+      previous_qty: prev.quantity ?? 0,
+      new_qty: newItem?.quantity ?? 0,
+      total: (prev.quantity ?? 0) + (newItem?.quantity ?? 0),
+    }
+  })
+  // Also include any new stock items that have no matching previous entry
+  newStockItems.forEach(n => {
+    if (!stockRows.find(r => r.item_name === n.item_name)) {
+      stockRows.push({ item_name: n.item_name, previous_qty: 0, new_qty: n.quantity ?? 0, total: n.quantity ?? 0 })
+    }
+  })
+
+  const totalSalesRevenue = salesItems.reduce((s, i) => s + (i.total_amount ?? 0), 0)
+  const totalPayments = (ef.cash_payments ?? 0) + (ef.card_payments ?? 0) + (ef.transfer_payments ?? 0)
 
   return (
-    <div className="p-8">
-      {/* Header with DYNAMIC back link */}
+    <div className="p-8 max-w-5xl mx-auto">
+      {/* Header */}
       <div className="mb-8">
         <Link href={backLink.href} className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-4">
           <ArrowLeft className="w-4 h-4 mr-2" />
@@ -326,21 +368,22 @@ export default function ReviewReportPage() {
               <div className="flex items-center space-x-2 mt-1">
                 <p className="text-gray-600">Review and take action</p>
                 <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                  report.manager_role === 'front_office_manager' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-700'
+                  report.manager_role === 'front_office_manager'
+                    ? 'bg-indigo-100 text-indigo-700'
+                    : 'bg-gray-100 text-gray-700'
                 }`}>
                   {report.manager_role === 'front_office_manager' ? '🏨 Front Office Manager' : '🏪 Store Manager'}
                 </span>
               </div>
             </div>
           </div>
-          {/* DYNAMIC status badge - shows actual status, not hardcoded */}
           <span className={`status-badge status-${report.status}`}>
             {getStatusLabel(report.status)}
           </span>
         </div>
       </div>
 
-      {/* REJECTION DETAILS - show if rejected */}
+      {/* Rejection details */}
       {report.status === 'rejected' && report.rejection_reason && (
         <div className="mb-6 card border-l-4 border-red-500 bg-red-50">
           <h3 className="text-lg font-semibold text-red-900 mb-3 flex items-center">
@@ -351,17 +394,19 @@ export default function ReviewReportPage() {
             <div><span className="text-sm font-semibold text-red-700">Feedback:</span><p className="text-sm text-red-800 mt-1">{report.rejection_feedback}</p></div>
             {report.resubmission_deadline && (
               <div><span className="text-sm font-semibold text-red-700">Resubmission Deadline:</span>
-              <p className="text-sm text-red-800 mt-1">{format(new Date(report.resubmission_deadline), 'MMM dd, yyyy')}</p></div>
+                <p className="text-sm text-red-800 mt-1">{format(new Date(report.resubmission_deadline), 'MMM dd, yyyy')}</p>
+              </div>
             )}
             {report.reviewed_at && (
               <div><span className="text-sm font-semibold text-red-700">Rejected On:</span>
-              <p className="text-sm text-red-800 mt-1">{format(new Date(report.reviewed_at), 'MMM dd, yyyy h:mm a')}</p></div>
+                <p className="text-sm text-red-800 mt-1">{format(new Date(report.reviewed_at), 'MMM dd, yyyy h:mm a')}</p>
+              </div>
             )}
           </div>
         </div>
       )}
 
-      {/* APPROVAL DETAILS - show if approved */}
+      {/* Approval banner */}
       {report.status === 'approved' && report.reviewed_at && (
         <div className="mb-6 card border-l-4 border-green-500 bg-green-50">
           <h3 className="text-lg font-semibold text-green-900 mb-2 flex items-center">
@@ -371,7 +416,7 @@ export default function ReviewReportPage() {
         </div>
       )}
 
-      {/* CLARIFICATION THREAD - always show if it exists, regardless of status */}
+      {/* Clarification thread */}
       {report.clarification_thread && report.clarification_thread.length > 0 && (
         <div className="mb-6 card bg-orange-50 border-orange-200">
           <div className="flex items-start space-x-3">
@@ -379,19 +424,22 @@ export default function ReviewReportPage() {
             <div className="flex-1">
               <h3 className="text-lg font-semibold text-orange-900 mb-3">
                 Clarification Conversation
-                <span className="ml-2 text-sm font-normal text-orange-600">({report.clarification_thread.length} message{report.clarification_thread.length > 1 ? 's' : ''})</span>
+                <span className="ml-2 text-sm font-normal text-orange-600">
+                  ({report.clarification_thread.length} message{report.clarification_thread.length > 1 ? 's' : ''})
+                </span>
               </h3>
               <div className="space-y-3 max-h-96 overflow-y-auto">
                 {report.clarification_thread.map((message, index) => (
-                  <div key={message.id}
-                    className={`rounded-lg p-4 ${message.type === 'question' ? 'bg-blue-50 border border-blue-200' : 'bg-green-50 border border-green-200'}`}>
+                  <div key={message.id} className={`rounded-lg p-4 ${
+                    message.type === 'question' ? 'bg-blue-50 border border-blue-200' : 'bg-green-50 border border-green-200'
+                  }`}>
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex items-center space-x-2">
                         {message.type === 'question'
                           ? <AlertCircle className="w-4 h-4 text-blue-600" />
                           : <CheckCircle className="w-4 h-4 text-green-600" />}
                         <span className={`text-sm font-semibold ${message.type === 'question' ? 'text-blue-900' : 'text-green-900'}`}>
-                          {message.type === 'question' ? `BDM Question` : `Manager's Response`}
+                          {message.type === 'question' ? 'BDM Question' : "Manager's Response"}
                           {message.author_name && ` — ${message.author_name}`}
                         </span>
                       </div>
@@ -428,7 +476,7 @@ export default function ReviewReportPage() {
         </div>
       )}
 
-      {/* Report Info Cards */}
+      {/* Report meta */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
         <div className="card">
           <div className="flex items-center space-x-3">
@@ -460,62 +508,159 @@ export default function ReviewReportPage() {
         </div>
       </div>
 
-      {/* Report Details - dynamic based on type */}
-      <div className="card mb-6">
-        <h2 className="text-xl font-bold text-gray-900 mb-4">Report Details</h2>
+      {/* ── STOCK & SALES REPORT DETAILS ── */}
+      {type === 'stock_inventory' && (
+        <div className="space-y-6 mb-6">
 
-        {/* Store manager report types - show items table */}
-        {['stock', 'sales', 'expense'].includes(type) && (
-          <>
-            {report.total_amount !== undefined && type !== 'expense' && (
-              <div className="mb-4 p-4 bg-gray-50 rounded-lg">
-                <div className="text-sm text-gray-600">Total Amount</div>
-                <div className="text-2xl font-bold text-gray-900">{formatCurrency(report.total_amount)}</div>
-              </div>
-            )}
-            {report.notes && (
-              <div className="mb-4">
-                <div className="text-sm font-medium text-gray-700 mb-2">Manager Notes:</div>
-                <div className="p-4 bg-gray-50 rounded-lg text-gray-700">{report.notes}</div>
-              </div>
-            )}
-            {items.length > 0 && (
-              <div>
-                <div className="text-sm font-medium text-gray-700 mb-2">Items:</div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        {type === 'stock' && (<><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Item Name</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit</th></>)}
-                        {type === 'sales' && (<><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit Price</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th></>)}
-                        {type === 'expense' && (<><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Item</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th></>)}
+          {/* Stock levels table */}
+          {stockRows.length > 0 && (
+            <div className="card bg-purple-50 border-purple-200">
+              <h2 className="text-lg font-bold text-purple-900 mb-4">📦 Stock Levels</h2>
+              <div className="bg-white rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-purple-100">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-purple-900 font-semibold">Item</th>
+                      <th className="px-4 py-3 text-right text-purple-900 font-semibold">Previous Day's Stock<br/><span className="font-normal text-xs text-purple-600">(Closing Stock)</span></th>
+                      <th className="px-4 py-3 text-right text-purple-900 font-semibold">New Stock<br/><span className="font-normal text-xs text-purple-600">(Requisition Received)</span></th>
+                      <th className="px-4 py-3 text-right text-purple-900 font-semibold">Total Available</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockRows.map((row, i) => (
+                      <tr key={i} className="border-t border-purple-100">
+                        <td className="px-4 py-3 font-medium text-gray-900">{row.item_name}</td>
+                        <td className="px-4 py-3 text-right text-gray-700">{row.previous_qty}</td>
+                        <td className="px-4 py-3 text-right text-gray-700">{row.new_qty}</td>
+                        <td className="px-4 py-3 text-right font-bold text-purple-900">{row.total}</td>
                       </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {items.map((item, i) => (
-                        <tr key={i}>
-                          {type === 'stock' && (<><td className="px-4 py-3 text-sm text-gray-900">{item.item_name}</td><td className="px-4 py-3 text-sm text-gray-900">{item.quantity}</td><td className="px-4 py-3 text-sm text-gray-900">{item.unit}</td></>)}
-                          {type === 'sales' && (<><td className="px-4 py-3 text-sm text-gray-900">{item.product_name}</td><td className="px-4 py-3 text-sm text-gray-900">{item.quantity}</td><td className="px-4 py-3 text-sm text-gray-900">{formatCurrency(item.unit_price)}</td><td className="px-4 py-3 text-sm font-semibold text-gray-900">{formatCurrency(item.total_price)}</td></>)}
-                          {type === 'expense' && (<><td className="px-4 py-3 text-sm text-gray-900">{item.item_name}</td><td className="px-4 py-3 text-sm text-gray-900">{item.quantity}</td></>)}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Sales table */}
+          {salesItems.length > 0 && (
+            <div className="card bg-orange-50 border-orange-200">
+              <h2 className="text-lg font-bold text-orange-900 mb-4">🛒 Sales</h2>
+              <div className="bg-white rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-orange-100">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-orange-900 font-semibold">Item</th>
+                      <th className="px-4 py-3 text-right text-orange-900 font-semibold">Qty Sold</th>
+                      <th className="px-4 py-3 text-right text-orange-900 font-semibold">Unit Price</th>
+                      <th className="px-4 py-3 text-right text-orange-900 font-semibold">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {salesItems.map((item, i) => (
+                      <tr key={i} className="border-t border-orange-100">
+                        <td className="px-4 py-3 font-medium text-gray-900">{item.item_name}</td>
+                        <td className="px-4 py-3 text-right text-gray-700">{item.quantity}</td>
+                        <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(item.unit_price)}</td>
+                        <td className="px-4 py-3 text-right font-bold text-orange-900">{formatCurrency(item.total_amount)}</td>
+                      </tr>
+                    ))}
+                    <tr className="border-t-2 border-orange-300 bg-orange-50">
+                      <td colSpan={3} className="px-4 py-3 font-bold text-orange-900 text-right">Total Sales Revenue</td>
+                      <td className="px-4 py-3 text-right font-bold text-orange-900 text-lg">{formatCurrency(totalSalesRevenue)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Payment breakdown */}
+          <div className="card">
+            <h2 className="text-lg font-bold text-gray-900 mb-4">💰 Payment Methods</h2>
+            <div className="grid grid-cols-3 gap-4 mb-4">
+              <div className="bg-gray-50 p-3 rounded-lg text-center">
+                <div className="text-xs text-gray-500 mb-1">Cash</div>
+                <div className="font-bold text-gray-900">{formatCurrency(ef.cash_payments)}</div>
+              </div>
+              <div className="bg-blue-50 p-3 rounded-lg text-center">
+                <div className="text-xs text-gray-500 mb-1">Card / POS</div>
+                <div className="font-bold text-gray-900">{formatCurrency(ef.card_payments)}</div>
+              </div>
+              <div className="bg-purple-50 p-3 rounded-lg text-center">
+                <div className="text-xs text-gray-500 mb-1">Transfer</div>
+                <div className="font-bold text-gray-900">{formatCurrency(ef.transfer_payments)}</div>
+              </div>
+            </div>
+
+            {/* Per-bank breakdown if available */}
+            {paymentBreakdown && (
+              <div className="space-y-3">
+                {paymentBreakdown.card_breakdown?.length > 0 && (
+                  <div>
+                    <div className="text-xs font-semibold text-gray-600 mb-1">Card/POS by terminal:</div>
+                    {paymentBreakdown.card_breakdown.map((b: any, i: number) => (
+                      <div key={i} className="flex justify-between text-sm text-blue-700 pl-3">
+                        <span>↳ {b.bank}</span>
+                        <span>{formatCurrency(b.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {paymentBreakdown.transfer_breakdown?.length > 0 && (
+                  <div>
+                    <div className="text-xs font-semibold text-gray-600 mb-1">Transfers by bank:</div>
+                    {paymentBreakdown.transfer_breakdown.map((b: any, i: number) => (
+                      <div key={i} className="flex justify-between text-sm text-purple-700 pl-3">
+                        <span>↳ {b.bank}</span>
+                        <span>{formatCurrency(b.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
-          </>
-        )}
 
-        {/* Occupancy report details */}
-        {type === 'occupancy' && (
+            <div className="mt-4 pt-4 border-t flex justify-between items-center">
+              <span className="font-bold text-gray-900">Total Payments</span>
+              <span className="text-xl font-bold text-gray-900">{formatCurrency(totalPayments)}</span>
+            </div>
+            {Math.abs(totalPayments - totalSalesRevenue) > 0.01 && totalPayments > 0 && totalSalesRevenue > 0 && (
+              <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700 font-medium">
+                ⚠️ Payments ({formatCurrency(totalPayments)}) don't match sales revenue ({formatCurrency(totalSalesRevenue)})
+              </div>
+            )}
+          </div>
+
+          {visibleNotes && (
+            <div className="card">
+              <div className="text-sm font-medium text-gray-700 mb-2">Additional Notes</div>
+              <div className="p-3 bg-gray-50 rounded text-sm text-gray-700">{visibleNotes}</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── EXPENSE REPORT ── */}
+      {type === 'expense' && (
+        <div className="card mb-6">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">Report Details</h2>
+          {report.notes && (
+            <div className="p-3 bg-gray-50 rounded text-sm text-gray-700">{report.notes}</div>
+          )}
+        </div>
+      )}
+
+      {/* ── OCCUPANCY REPORT ── */}
+      {type === 'occupancy' && (
+        <div className="card mb-6">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">Report Details</h2>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             {[
-              { label: 'Total Rooms', value: ef.total_rooms, color: 'bg-gray-50' },
-              { label: 'Occupied', value: ef.occupied_rooms, color: 'bg-green-50' },
-              { label: 'Vacant', value: ef.vacant_rooms, color: 'bg-blue-50' },
-              { label: 'Maintenance', value: ef.maintenance_rooms, color: 'bg-yellow-50' },
-              { label: 'Occupancy Rate', value: `${ef.occupancy_percentage}%`, color: 'bg-indigo-50' },
+              { label: 'Total Rooms',     value: ef.total_rooms,          color: 'bg-gray-50' },
+              { label: 'Occupied',        value: ef.occupied_rooms,        color: 'bg-green-50' },
+              { label: 'Vacant',          value: ef.vacant_rooms,          color: 'bg-blue-50' },
+              { label: 'Maintenance',     value: ef.maintenance_rooms,     color: 'bg-yellow-50' },
+              { label: 'Occupancy Rate',  value: `${ef.occupancy_percentage}%`, color: 'bg-indigo-50' },
             ].map(({ label, value, color }) => (
               <div key={label} className={`${color} p-4 rounded-lg`}>
                 <div className="text-sm text-gray-600">{label}</div>
@@ -524,18 +669,21 @@ export default function ReviewReportPage() {
             ))}
             {report.notes && <div className="col-span-full mt-2"><div className="text-sm font-medium text-gray-700 mb-1">Notes:</div><div className="p-3 bg-gray-50 rounded text-sm text-gray-700">{report.notes}</div></div>}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Guest activity details */}
-        {type === 'guest_activity' && (
+      {/* ── GUEST ACTIVITY REPORT ── */}
+      {type === 'guest_activity' && (
+        <div className="card mb-6">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">Report Details</h2>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             {[
-              { label: 'Check-Ins', value: ef.check_ins, color: 'bg-green-50' },
-              { label: 'Check-Outs', value: ef.check_outs, color: 'bg-blue-50' },
-              { label: 'Expected Arrivals', value: ef.expected_arrivals, color: 'bg-indigo-50' },
+              { label: 'Check-Ins',           value: ef.check_ins,           color: 'bg-green-50' },
+              { label: 'Check-Outs',          value: ef.check_outs,          color: 'bg-blue-50' },
+              { label: 'Expected Arrivals',   value: ef.expected_arrivals,   color: 'bg-indigo-50' },
               { label: 'Expected Departures', value: ef.expected_departures, color: 'bg-purple-50' },
-              { label: 'Walk-Ins', value: ef.walk_ins, color: 'bg-pink-50' },
-              { label: 'No-Shows', value: ef.no_shows, color: 'bg-red-50' },
+              { label: 'Walk-Ins',            value: ef.walk_ins,            color: 'bg-pink-50' },
+              { label: 'No-Shows',            value: ef.no_shows,            color: 'bg-red-50' },
             ].map(({ label, value, color }) => (
               <div key={label} className={`${color} p-4 rounded-lg`}>
                 <div className="text-sm text-gray-600">{label}</div>
@@ -544,10 +692,13 @@ export default function ReviewReportPage() {
             ))}
             {report.notes && <div className="col-span-full mt-2"><div className="text-sm font-medium text-gray-700 mb-1">Notes:</div><div className="p-3 bg-gray-50 rounded text-sm text-gray-700">{report.notes}</div></div>}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Revenue report details */}
-        {type === 'revenue' && (
+      {/* ── REVENUE REPORT ── */}
+      {type === 'revenue' && (
+        <div className="card mb-6">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">Report Details</h2>
           <div className="space-y-4">
             <div className="p-4 bg-emerald-50 rounded-lg">
               <div className="text-sm text-gray-600">Total Revenue</div>
@@ -569,7 +720,11 @@ export default function ReviewReportPage() {
             <div>
               <div className="text-sm font-medium text-gray-700 mb-2">Payment Methods</div>
               <div className="grid grid-cols-3 gap-3">
-                {[{ label: 'Cash', value: ef.cash_payments }, { label: 'Card', value: ef.card_payments }, { label: 'Transfer', value: ef.transfer_payments }].map(({ label, value }) => (
+                {[
+                  { label: 'Cash', value: ef.cash_payments },
+                  { label: 'Card', value: ef.card_payments },
+                  { label: 'Transfer', value: ef.transfer_payments },
+                ].map(({ label, value }) => (
                   <div key={label} className="bg-gray-50 p-3 rounded-lg text-center">
                     <div className="text-xs text-gray-500">{label}</div>
                     <div className="font-semibold text-gray-900 mt-1 text-sm">{formatCurrency(value)}</div>
@@ -579,10 +734,13 @@ export default function ReviewReportPage() {
             </div>
             {report.notes && <div><div className="text-sm font-medium text-gray-700 mb-1">Notes:</div><div className="p-3 bg-gray-50 rounded text-sm text-gray-700">{report.notes}</div></div>}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Complaint report details */}
-        {type === 'complaint' && (
+      {/* ── COMPLAINT REPORT ── */}
+      {type === 'complaint' && (
+        <div className="card mb-6">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">Report Details</h2>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-gray-50 p-3 rounded-lg">
@@ -603,17 +761,20 @@ export default function ReviewReportPage() {
               {ef.resolution_details && <div className="text-sm text-gray-600 mt-1">{ef.resolution_details}</div>}
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Action Buttons - only for pending/clarification_requested with response */}
+      {/* Action Buttons */}
       {showActionButtons && (
         <div className="flex flex-wrap gap-4">
           <button onClick={handleApprove} disabled={processing} className="btn-primary flex items-center">
             <CheckCircle className="w-5 h-5 mr-2" /> Approve Report
           </button>
-          <button onClick={() => { setClarificationRequest(''); setShowClarificationModal(true) }} disabled={processing}
-            className="px-6 py-2 bg-orange-600 text-white rounded-lg font-medium hover:bg-orange-700 transition-colors flex items-center disabled:opacity-50">
+          <button
+            onClick={() => { setClarificationRequest(''); setShowClarificationModal(true) }}
+            disabled={processing}
+            className="px-6 py-2 bg-orange-600 text-white rounded-lg font-medium hover:bg-orange-700 transition-colors flex items-center disabled:opacity-50"
+          >
             <MessageCircle className="w-5 h-5 mr-2" />
             {report.clarification_thread && report.clarification_thread.length > 0 ? 'Ask Another Question' : 'Request Clarification'}
           </button>
@@ -647,19 +808,21 @@ export default function ReviewReportPage() {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Rejection Reason *</label>
-                <input type="text" value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)}
-                  placeholder="e.g., Incomplete data, Incorrect figures" className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500" />
+                <input type="text" value={rejectionReason} onChange={e => setRejectionReason(e.target.value)}
+                  placeholder="e.g., Incomplete data, Incorrect figures"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Detailed Feedback *</label>
-                <textarea value={rejectionFeedback} onChange={(e) => setRejectionFeedback(e.target.value)}
+                <textarea value={rejectionFeedback} onChange={e => setRejectionFeedback(e.target.value)}
                   placeholder="Provide detailed feedback on what needs to be corrected..." rows={4}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Resubmission Deadline (Optional)</label>
-                <input type="date" value={resubmissionDeadline} onChange={(e) => setResubmissionDeadline(e.target.value)}
-                  min={new Date().toISOString().split('T')[0]} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500" />
+                <input type="date" value={resubmissionDeadline} onChange={e => setResubmissionDeadline(e.target.value)}
+                  min={new Date().toISOString().split('T')[0]}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500" />
               </div>
             </div>
             <div className="flex space-x-4 mt-6">
@@ -679,7 +842,7 @@ export default function ReviewReportPage() {
             </h2>
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">Your Question *</label>
-              <textarea value={clarificationRequest} onChange={(e) => setClarificationRequest(e.target.value)}
+              <textarea value={clarificationRequest} onChange={e => setClarificationRequest(e.target.value)}
                 placeholder="Ask the manager to clarify specific details..." rows={4}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500" />
               <p className="mt-2 text-sm text-gray-500">The manager can respond without resubmitting the report.</p>

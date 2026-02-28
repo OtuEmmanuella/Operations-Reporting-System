@@ -43,6 +43,81 @@ export type Database = {
           position?: string | null
         }
       }
+      stock_inventory_reports: {
+  Row: {
+    id: string
+    manager_id: string
+    report_date: string
+    cash_payments: number
+    card_payments: number
+    transfer_payments: number
+    notes: string | null
+    status: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
+    rejection_reason: string | null
+    rejection_feedback: string | null
+    resubmission_deadline: string | null
+    clarification_request: string | null
+    clarification_requested_at: string | null
+    clarification_response: string | null
+    clarification_responded_at: string | null
+    clarification_thread: ClarificationMessage[] | null
+    reviewed_by: string | null
+    reviewed_at: string | null
+    created_at: string
+    updated_at: string
+  }
+  Insert: {
+    id?: string
+    manager_id: string
+    report_date: string
+    cash_payments?: number
+    card_payments?: number
+    transfer_payments?: number
+    notes?: string | null
+    status?: 'pending' | 'approved' | 'rejected' | 'clarification_requested'
+    rejection_reason?: string | null
+    rejection_feedback?: string | null
+    resubmission_deadline?: string | null
+    clarification_request?: string | null
+    clarification_requested_at?: string | null
+    clarification_response?: string | null
+    clarification_responded_at?: string | null
+    clarification_thread?: ClarificationMessage[] | null
+    reviewed_by?: string | null
+    reviewed_at?: string | null
+    created_at?: string
+    updated_at?: string
+  }
+  Update: {
+    [key: string]: any
+  }
+}
+stock_inventory_items: {
+  Row: {
+    id: string
+    report_id: string
+    item_section: 'previous_stock' | 'new_stock' | 'sales'
+    item_name: string
+    quantity: number
+    unit: string | null
+    unit_price: number | null
+    total_amount: number | null
+    created_at: string
+  }
+  Insert: {
+    id?: string
+    report_id: string
+    item_section: 'previous_stock' | 'new_stock' | 'sales'
+    item_name: string
+    quantity: number
+    unit?: string | null
+    unit_price?: number | null
+    created_at?: string
+  }
+  Update: {
+    [key: string]: any
+  }
+}
       stock_reports: {
         Row: {
           id: string
