@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { 
   ArrowLeft, Award, TrendingUp, TrendingDown, Users, CheckCircle, 
   XCircle, Clock, Target, AlertCircle, Medal, Star, Zap, Info,
-  ThumbsUp, ThumbsDown, Calendar, MessageCircle
+  ThumbsUp, ThumbsDown, Calendar, MessageCircle, ChevronUp, ChevronDown
 } from 'lucide-react'
 import { format, differenceInHours, subDays } from 'date-fns'
 import Link from 'next/link'
@@ -127,24 +127,28 @@ export default function ManagerPerformancePage() {
   }
 
   const loadAllReports = async (startDate: string, endDate: string) => {
-    const tables = [
-      'stock_reports', 'sales_reports', 'expense_reports',
-      'occupancy_reports', 'guest_activity_reports', 'revenue_reports', 'complaint_reports'
-    ]
-    
-    const results = await Promise.all(
-      tables.map(table => 
-        supabase
-          .from(table as any)
-          .select('*')
-          .gte('report_date', startDate)
-          .lte('report_date', endDate)
-          .then(({ data }) => data || [])
-      )
+  const tables = [
+    'stock_inventory_reports',  // ADDED
+    'expense_reports',
+    'occupancy_reports',
+    'guest_activity_reports',
+    'revenue_reports',
+    'complaint_reports'
+  ]
+  
+  const results = await Promise.all(
+    tables.map(table => 
+      supabase
+        .from(table as any)
+        .select('*')
+        .gte('report_date', startDate)
+        .lte('report_date', endDate)
+        .then(({ data }) => data || [])
     )
-    
-    return results.flat()
-  }
+  )
+  
+  return results.flat()
+}
 
   const calculateManagerPerformance = async (
     manager: any,
@@ -560,15 +564,18 @@ export default function ManagerPerformancePage() {
         )}
 
         {/* Contact Button */}
+      
+        {/* Contact Button */}
         <div className="mt-4 pt-4 border-t border-gray-200">
-          
+          <a
             href={`mailto:${manager.email}`}
             className="w-full btn-secondary text-sm flex items-center justify-center"
           >
             <MessageCircle className="w-4 h-4 mr-2" />
             Send Feedback
           </a>
-        </div>
+      </div>
+
       </div>
     )
   }

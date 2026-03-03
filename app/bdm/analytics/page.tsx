@@ -5,9 +5,9 @@ import { supabase } from '@/lib/supabase'
 import { 
   TrendingUp, TrendingDown, DollarSign, Hotel, Users, Clock, 
   AlertCircle, ArrowRight, Lightbulb, Target, Award, Zap, 
-  Calendar, ChevronDown, Info, CheckCircle, XCircle
+  Calendar, ChevronDown, Info, CheckCircle, XCircle, X, Package, Mail
 } from 'lucide-react'
-import { format, subDays, startOfMonth, endOfMonth, differenceInHours } from 'date-fns'
+import { format, subDays, startOfMonth, endOfMonth, differenceInHours, eachDayOfInterval } from 'date-fns'
 import Link from 'next/link'
 
 interface DashboardData {
@@ -35,6 +35,16 @@ interface DashboardData {
   totalReports: number
   pendingReports: number
   complaintsToday: number
+  
+  // Inventory Insights
+  topSellingItems: TopSellingItem[]
+}
+
+interface TopSellingItem {
+  name: string
+  quantity: number
+  revenue: number
+  branch: string
 }
 
 interface Alert {
@@ -63,11 +73,23 @@ interface Recommendation {
   actionLink?: string
 }
 
+interface MissingReport {
+  manager_id: string
+  manager_name: string
+  manager_email: string
+  manager_role: string
+  branch: string | null
+  missing_dates: string[]
+  total_missing: number
+}
+
 export default function AnalyticsDashboard() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<DashboardData | null>(null)
   const [dateRange, setDateRange] = useState<'today' | '7d' | '30d'>('7d')
   const [showTooltip, setShowTooltip] = useState<string | null>(null)
+  const [showMissingReportsModal, setShowMissingReportsModal] = useState(false)
+  const [missingReports, setMissingReports] = useState<MissingReport[]>([])
 
   useEffect(() => {
     loadDashboard()
@@ -80,26 +102,31 @@ export default function AnalyticsDashboard() {
       const startDate = format(start, 'yyyy-MM-dd')
       const endDate = format(end, 'yyyy-MM-dd')
 
-      // Load all data in parallel
-      const [managers, revenues, occupancies, allReports, complaints] = await Promise.all([
+      // Load all data in parallel - INCLUDE stock_inventory_reports for sales revenue
+      const [managers, revenues, stockReports, occupancies, allReports, complaints] = await Promise.all([
         supabase.from('users').select('*').in('role', ['manager', 'front_office_manager']),
         supabase.from('revenue_reports').select('*').gte('report_date', startDate).lte('report_date', endDate),
+        supabase.from('stock_inventory_reports').select('*').gte('report_date', startDate).lte('report_date', endDate).eq('status', 'approved'),
         supabase.from('occupancy_reports').select('*').gte('report_date', startDate).lte('report_date', endDate),
         loadAllReports(startDate, endDate),
         supabase.from('complaint_reports').select('*').eq('report_date', format(new Date(), 'yyyy-MM-dd')),
       ])
 
-      // Calculate KPIs
+      // Load inventory insights
+      const inventoryInsights = await loadInventoryInsights(startDate, endDate)
+
+      // Calculate KPIs with COMBINED revenue (front office + manager sales)
       const kpis = calculateKPIs(
         revenues.data || [],
+        stockReports.data || [],
         occupancies.data || [],
         allReports,
         managers.data || []
       )
 
       // Generate insights and recommendations
-      const insights = generateInsights(kpis, revenues.data || [], occupancies.data || [])
-      const recommendations = generateRecommendations(kpis)
+      const insights = generateInsights(kpis, revenues.data || [], occupancies.data || [], inventoryInsights)
+      const recommendations = generateRecommendations(kpis, inventoryInsights)
       const alerts = generateAlerts(kpis, complaints.data || [])
 
       setData({
@@ -110,11 +137,124 @@ export default function AnalyticsDashboard() {
         totalReports: allReports.length,
         pendingReports: allReports.filter(r => r.status === 'pending').length,
         complaintsToday: complaints.data?.length || 0,
+        topSellingItems: inventoryInsights.topSellingItems,
       })
     } catch (error) {
       console.error('Error loading dashboard:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadMissingReports = async () => {
+    try {
+      const { start, end } = getDateRange()
+      const startDate = format(start, 'yyyy-MM-dd')
+      const endDate = format(end, 'yyyy-MM-dd')
+
+      // Get all managers with email
+      const { data: managers } = await supabase
+        .from('users')
+        .select('*')
+        .in('role', ['manager', 'front_office_manager'])
+
+      // Get date range
+      const dateArray = eachDayOfInterval({ start, end }).map(d => format(d, 'yyyy-MM-dd'))
+
+      // Load all reports
+      const allReports = await loadAllReports(startDate, endDate)
+
+      const missing: MissingReport[] = []
+
+      managers?.forEach(manager => {
+        const managerReports = allReports.filter(r => r.manager_id === manager.id)
+        const reportedDates = new Set(managerReports.map(r => r.report_date))
+
+        const missingDates = dateArray.filter(date => !reportedDates.has(date))
+
+        if (missingDates.length > 0) {
+          missing.push({
+            manager_id: manager.id,
+            manager_name: manager.full_name,
+            manager_email: manager.email,
+            manager_role: manager.role,
+            branch: manager.branch || null,
+            missing_dates: missingDates,
+            total_missing: missingDates.length,
+          })
+        }
+      })
+
+      setMissingReports(missing.sort((a, b) => b.total_missing - a.total_missing))
+      setShowMissingReportsModal(true)
+    } catch (error) {
+      console.error('Error loading missing reports:', error)
+    }
+  }
+
+  const loadInventoryInsights = async (startDate: string, endDate: string) => {
+    try {
+      // Get all sales items from stock_inventory_items
+      const { data: salesItems } = await supabase
+        .from('stock_inventory_items')
+        .select(`
+          *,
+          stock_inventory_reports!inner(report_date, status)
+        `)
+        .eq('item_section', 'sales')
+        .eq('stock_inventory_reports.status', 'approved')
+        .gte('stock_inventory_reports.report_date', startDate)
+        .lte('stock_inventory_reports.report_date', endDate)
+
+      // Get menu items for branch info
+      const { data: menuItems } = await supabase
+        .from('menu_items')
+        .select('*')
+
+      // Aggregate by item name
+      const itemStats = new Map<string, {
+        name: string
+        totalQty: number
+        totalRevenue: number
+        branch: string
+      }>()
+
+      salesItems?.forEach(item => {
+        const key = item.item_name
+        const existing = itemStats.get(key) || {
+          name: item.item_name,
+          totalQty: 0,
+          totalRevenue: 0,
+          branch: ''
+        }
+
+        existing.totalQty += item.quantity || 0
+        existing.totalRevenue += item.total_amount || 0
+
+        // Match with menu_items to get branch
+        const menuItem = menuItems?.find(m => m.name.toLowerCase() === item.item_name.toLowerCase())
+        if (menuItem && !existing.branch) {
+          existing.branch = menuItem.branch
+        }
+
+        itemStats.set(key, existing)
+      })
+
+      // Convert to array and get top 5
+      const topSellingItems = Array.from(itemStats.values())
+        .sort((a, b) => b.totalQty - a.totalQty)
+        .slice(0, 5)
+        .map(item => ({
+          name: item.name,
+          quantity: item.totalQty,
+          revenue: item.totalRevenue,
+          branch: item.branch || 'Multiple'
+        }))
+
+      return { topSellingItems }
+    } catch (error) {
+      console.error('Error loading inventory insights:', error)
+      return { topSellingItems: [] }
     }
   }
 
@@ -128,32 +268,43 @@ export default function AnalyticsDashboard() {
   }
 
   const loadAllReports = async (startDate: string, endDate: string) => {
-  const tables = [
-    'stock_inventory_reports',  // NEW: unified stock + inventory
-    'sales_reports',
-    'occupancy_reports',
-    'guest_activity_reports',
-    'revenue_reports',
-    'complaint_reports'
-  ]
-  
-  const results = await Promise.all(
-    tables.map(table => 
-      supabase
-        .from(table as any)
-        .select('*')
-        .gte('report_date', startDate)
-        .lte('report_date', endDate)
-        .then(({ data }) => data || [])
-    )
-  )
-  
-  return results.flat()
-}
+    const tables = [
+      'stock_inventory_reports',
+      'occupancy_reports',
+      'guest_activity_reports',
+      'revenue_reports',
+      'complaint_reports'
+    ]
 
-  const calculateKPIs = (revenues: any[], occupancies: any[], reports: any[], managers: any[]) => {
-    // Revenue metrics
-    const totalRevenue = revenues.reduce((sum, r) => sum + (r.total_revenue || 0), 0)
+    const results = await Promise.all(
+      tables.map(table =>
+        supabase
+          .from(table as any)
+          .select('*')
+          .gte('report_date', startDate)
+          .lte('report_date', endDate)
+          .then(({ data }) => data || [])
+      )
+    )
+
+    return results.flat()
+  }
+
+  const calculateKPIs = (
+    revenues: any[],
+    stockReports: any[],
+    occupancies: any[],
+    reports: any[],
+    managers: any[]
+  ) => {
+    // COMBINED REVENUE: Front office + Manager sales
+    const frontOfficeRevenue = revenues.reduce((sum, r) => sum + (r.total_revenue || 0), 0)
+    const managerSalesRevenue = stockReports.reduce((sum, r) => {
+      return sum + (r.cash_payments || 0) + (r.card_payments || 0) + (r.transfer_payments || 0)
+    }, 0)
+    const totalRevenue = frontOfficeRevenue + managerSalesRevenue
+
+    // Previous period revenue for growth calculation
     const prevPeriodRevenues = revenues.filter(r => {
       const days = dateRange === 'today' ? 1 : dateRange === '7d' ? 7 : 30
       const d = new Date(r.report_date)
@@ -164,19 +315,19 @@ export default function AnalyticsDashboard() {
 
     // Occupancy metrics
     const avgOccupancy = occupancies.length > 0
-      ? occupancies.reduce((sum, o) => sum + o.occupancy_percentage, 0) / occupancies.length
+      ? occupancies.reduce((sum, o) => sum + (o.occupancy_percentage || 0), 0) / occupancies.length
       : 0
     const recentOcc = occupancies.slice(-3)
     const earlierOcc = occupancies.slice(0, 3)
-    const recentAvg = recentOcc.length > 0 ? recentOcc.reduce((s, o) => s + o.occupancy_percentage, 0) / recentOcc.length : 0
-    const earlierAvg = earlierOcc.length > 0 ? earlierOcc.reduce((s, o) => s + o.occupancy_percentage, 0) / earlierOcc.length : 0
+    const recentAvg = recentOcc.length > 0 ? recentOcc.reduce((s, o) => s + (o.occupancy_percentage || 0), 0) / recentOcc.length : 0
+    const earlierAvg = earlierOcc.length > 0 ? earlierOcc.reduce((s, o) => s + (o.occupancy_percentage || 0), 0) / earlierOcc.length : 0
     const occupancyTrend = earlierAvg > 0 ? ((recentAvg - earlierAvg) / earlierAvg) * 100 : 0
 
     // Hotel KPIs
     const totalRoomRevenue = revenues.reduce((sum, r) => sum + (r.room_revenue || 0), 0)
     const totalRoomNights = occupancies.reduce((sum, o) => sum + (o.occupied_rooms || 0), 0)
     const adr = totalRoomNights > 0 ? totalRoomRevenue / totalRoomNights : 0
-    
+
     const totalAvailableRooms = occupancies.reduce((sum, o) => sum + (o.total_rooms || 0), 0)
     const revpar = totalAvailableRooms > 0 ? totalRevenue / totalAvailableRooms : 0
 
@@ -190,7 +341,7 @@ export default function AnalyticsDashboard() {
     const avgApprovalTime = approvedReports.length > 0
       ? approvedReports.reduce((sum, r) => sum + differenceInHours(new Date(r.reviewed_at), new Date(r.created_at)), 0) / approvedReports.length
       : 0
-    
+
     const rejectionRate = reports.length > 0
       ? (reports.filter(r => r.status === 'rejected').length / reports.length) * 100
       : 0
@@ -218,7 +369,12 @@ export default function AnalyticsDashboard() {
     }
   }
 
-  const generateInsights = (kpis: any, revenues: any[], occupancies: any[]): Insight[] => {
+  const generateInsights = (
+    kpis: any,
+    revenues: any[],
+    occupancies: any[],
+    inventory: { topSellingItems: TopSellingItem[] }
+  ): Insight[] => {
     const insights: Insight[] = []
 
     // Revenue insight
@@ -270,10 +426,25 @@ export default function AnalyticsDashboard() {
       })
     }
 
+    // Inventory insight
+    if (inventory.topSellingItems.length > 0) {
+      const topItem = inventory.topSellingItems[0]
+      insights.push({
+        id: '6',
+        icon: Package,
+        title: 'Top Selling Item Identified',
+        description: `${topItem.name} is your best seller with ${topItem.quantity} units sold. Ensure adequate stock levels.`,
+        impact: 'positive',
+      })
+    }
+
     return insights
   }
 
-  const generateRecommendations = (kpis: any): Recommendation[] => {
+  const generateRecommendations = (
+    kpis: any,
+    inventory: { topSellingItems: TopSellingItem[] }
+  ): Recommendation[] => {
     const recs: Recommendation[] = []
 
     // Revenue recommendations
@@ -320,6 +491,17 @@ export default function AnalyticsDashboard() {
       })
     }
 
+    // Inventory recommendation
+    if (inventory.topSellingItems.length >= 3) {
+      recs.push({
+        id: '5',
+        category: 'Inventory',
+        title: 'Optimize Stock for Top Sellers',
+        description: `Focus procurement on ${inventory.topSellingItems.slice(0, 3).map(i => i.name).join(', ')}. These items drive the most revenue.`,
+        priority: 'medium',
+      })
+    }
+
     return recs
   }
 
@@ -344,8 +526,7 @@ export default function AnalyticsDashboard() {
         type: 'warning',
         title: 'Low Report Submission',
         message: `${(100 - kpis.managerCompliance).toFixed(0)}% of managers haven't submitted today's reports.`,
-        action: 'Contact Managers',
-        actionLink: '/bdm/managers',
+        action: 'View Missing Reports',
       })
     }
 
@@ -370,14 +551,14 @@ export default function AnalyticsDashboard() {
     </div>
   )
 
-  const KPICard = ({ 
-    title, 
-    value, 
-    trend, 
-    icon: Icon, 
-    color, 
+  const KPICard = ({
+    title,
+    value,
+    trend,
+    icon: Icon,
+    color,
     tooltip,
-    link 
+    link
   }: {
     title: string
     value: string
@@ -388,14 +569,14 @@ export default function AnalyticsDashboard() {
     link?: string
   }) => {
     const [showTip, setShowTip] = useState(false)
-    
+
     const card = (
       <div className={`card ${link ? 'hover:shadow-lg cursor-pointer transition-all' : ''}`}>
         <div className="flex items-start justify-between mb-3">
           <div className="flex-1">
             <div className="flex items-center space-x-2 mb-2">
               <span className="text-sm font-medium text-gray-600">{title}</span>
-              <div 
+              <div
                 className="relative"
                 onMouseEnter={() => setShowTip(true)}
                 onMouseLeave={() => setShowTip(false)}
@@ -510,7 +691,7 @@ export default function AnalyticsDashboard() {
                     </div>
                   </div>
                 </div>
-                {alert.actionLink && (
+                {alert.actionLink ? (
                   <Link
                     href={alert.actionLink}
                     className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors flex-shrink-0 ${
@@ -523,7 +704,14 @@ export default function AnalyticsDashboard() {
                   >
                     {alert.action}
                   </Link>
-                )}
+                ) : alert.action === 'View Missing Reports' ? (
+                  <button
+                    onClick={loadMissingReports}
+                    className="px-4 py-2 rounded-lg font-medium text-sm bg-orange-600 text-white hover:bg-orange-700 transition-colors flex-shrink-0"
+                  >
+                    {alert.action}
+                  </button>
+                ) : null}
               </div>
             </div>
           ))}
@@ -538,10 +726,10 @@ export default function AnalyticsDashboard() {
           trend={data.revenueGrowth}
           icon={DollarSign}
           color="bg-green-500"
-          tooltip="Total revenue generated from all sources including rooms, laundry, and other services"
+          tooltip="Combined revenue from rooms, food & beverage, laundry, and manager sales"
           link="/bdm/analytics/revenue"
         />
-        
+
         <KPICard
           title="Occupancy Rate"
           value={`${data.avgOccupancy.toFixed(1)}%`}
@@ -551,7 +739,7 @@ export default function AnalyticsDashboard() {
           tooltip="Percentage of available rooms that are occupied. Industry standard: 60-70%"
           link="/bdm/analytics/revenue"
         />
-        
+
         <KPICard
           title="ADR (Avg Daily Rate)"
           value={`₦${data.adr.toLocaleString('en-NG', { maximumFractionDigits: 0 })}`}
@@ -560,7 +748,7 @@ export default function AnalyticsDashboard() {
           tooltip="Average revenue earned per occupied room. Higher ADR indicates better pricing power"
           link="/bdm/analytics/revenue"
         />
-        
+
         <KPICard
           title="RevPAR"
           value={`₦${data.revpar.toLocaleString('en-NG', { maximumFractionDigits: 0 })}`}
@@ -569,7 +757,7 @@ export default function AnalyticsDashboard() {
           tooltip="Revenue Per Available Room - combines occupancy and ADR to show overall room revenue performance"
           link="/bdm/analytics/revenue"
         />
-        
+
         <KPICard
           title="Manager Compliance"
           value={`${data.managerCompliance.toFixed(0)}%`}
@@ -578,7 +766,7 @@ export default function AnalyticsDashboard() {
           tooltip="Percentage of managers who submitted all required reports on time"
           link="/bdm/analytics/managers"
         />
-        
+
         <KPICard
           title="Report Quality"
           value={`${(100 - data.rejectionRate).toFixed(0)}%`}
@@ -588,6 +776,41 @@ export default function AnalyticsDashboard() {
           link="/bdm/analytics/reports"
         />
       </div>
+
+      {/* Top Selling Items */}
+      {data.topSellingItems.length > 0 && (
+        <div className="mb-8 card">
+          <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center">
+            <Package className="w-5 h-5 mr-2 text-purple-600" />
+            Top Selling Items
+          </h2>
+          <div className="space-y-3">
+            {data.topSellingItems.map((item, index) => (
+              <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center space-x-3">
+                  <span className="text-lg font-bold text-gray-400">#{index + 1}</span>
+                  <div>
+                    <div className="font-semibold text-gray-900">{item.name}</div>
+                    <div className="text-xs text-gray-500">{item.branch}</div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="font-bold text-gray-900">{item.quantity} sold</div>
+                  <div className="text-xs text-green-600">₦{item.revenue.toLocaleString('en-NG')}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+            <div className="text-xs font-semibold text-blue-900 mb-1">💡 Inventory Strategy:</div>
+            <div className="text-xs text-blue-700">
+              Focus procurement on top 3 items. Consider bulk discounts for high-volume items.
+              Stock levels should prioritize fast-moving inventory.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Smart Insights */}
       {data.smartInsights.length > 0 && (
@@ -732,6 +955,75 @@ export default function AnalyticsDashboard() {
           </div>
         </Link>
       </div>
+
+      {/* Missing Reports Modal */}
+      {showMissingReportsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+            <div className="p-6 border-b">
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-gray-900">Missing Reports</h2>
+                <button
+                  onClick={() => setShowMissingReportsModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              <p className="text-sm text-gray-600 mt-1">
+                Managers who haven't submitted reports for specific dates
+              </p>
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-[70vh]">
+              {missingReports.length === 0 ? (
+                <div className="text-center py-8">
+                  <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
+                  <p className="text-gray-600">All managers are up to date!</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {missingReports.map(manager => (
+                    <div key={manager.manager_id} className="p-4 bg-orange-50 border-l-4 border-orange-500 rounded-lg">
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <div className="font-semibold text-gray-900">{manager.manager_name}</div>
+                          <div className="text-sm text-gray-600">
+                            {manager.manager_role === 'front_office_manager' ? 'Front Office Manager' : 'Store Manager'}
+                            {manager.branch && ` • ${manager.branch}`}
+                          </div>
+                        </div>
+                        <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm font-medium">
+                          {manager.total_missing} missing
+                        </span>
+                      </div>
+                      <div className="mt-3">
+                        <div className="text-xs font-medium text-gray-700 mb-1">Missing dates:</div>
+                        <div className="flex flex-wrap gap-2">
+                          {manager.missing_dates.map(date => (
+                            <span key={date} className="px-2 py-1 bg-white border border-orange-200 rounded text-xs text-gray-700">
+                              {format(new Date(date), 'MMM dd')}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="mt-3 pt-3 border-t border-orange-200">
+                        <a
+                          href={`mailto:${manager.manager_email}?subject=Missing Reports Reminder&body=Hi ${manager.manager_name},%0D%0A%0D%0AYou have ${manager.total_missing} missing report(s). Please submit them as soon as possible.`}
+                          className="inline-flex items-center text-sm text-orange-700 hover:text-orange-900 font-medium"
+                        >
+                          <Mail className="w-4 h-4 mr-2" />
+                          Send Reminder Email
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

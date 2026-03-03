@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/router'
 import { supabase } from '@/lib/supabase'
 import { 
   ArrowLeft, DollarSign, TrendingUp, TrendingDown, Hotel, 
@@ -67,31 +66,31 @@ export default function RevenueAnalyticsPage() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<RevenueData | null>(null)
   const [dateRange, setDateRange] = useState<'7d' | '30d' | 'month'>('30d')
-  const [expandedChart, setExpandedChart] = useState<string>('revenue')
-  const [showTooltip, setShowTooltip] = useState<string | null>(null)
 
   useEffect(() => {
     loadRevenueData()
   }, [dateRange])
 
- const loadRevenueData = async () => {
+  const loadRevenueData = async () => {
   setLoading(true)
   try {
     const { start, end } = getDateRange()
     const startDate = format(start, 'yyyy-MM-dd')
     const endDate = format(end, 'yyyy-MM-dd')
 
-    // MERGE: Load both sales reports AND front office revenue reports
-    const [salesReports, revenueReports, occupancies] = await Promise.all([
+    console.log('📅 Loading revenue data from', startDate, 'to', endDate)
+
+    // Load BOTH revenue reports AND stock_inventory_reports
+    const [revenueReports, stockReports, occupancies] = await Promise.all([
       supabase
-        .from('sales_reports')
+        .from('revenue_reports')
         .select('*')
         .gte('report_date', startDate)
         .lte('report_date', endDate)
         .eq('status', 'approved')
         .order('report_date'),
       supabase
-        .from('revenue_reports')
+        .from('stock_inventory_reports')
         .select('*')
         .gte('report_date', startDate)
         .lte('report_date', endDate)
@@ -105,7 +104,11 @@ export default function RevenueAnalyticsPage() {
         .order('report_date'),
     ])
 
-    // COMBINE sales and revenue data by date
+    console.log('✅ Revenue reports loaded:', revenueReports.data?.length || 0)
+    console.log('✅ Stock reports loaded:', stockReports.data?.length || 0)
+    console.log('✅ Occupancy reports loaded:', occupancies.data?.length || 0)
+
+    // COMBINE revenue from both sources
     const combinedRevenueByDate: Record<string, {
       total: number
       room: number
@@ -114,17 +117,8 @@ export default function RevenueAnalyticsPage() {
       sales: number
     }> = {}
 
-    // Add sales reports
-    ;(salesReports.data || []).forEach(r => {
-      const date = r.report_date
-      if (!combinedRevenueByDate[date]) {
-        combinedRevenueByDate[date] = { total: 0, room: 0, laundry: 0, other: 0, sales: 0 }
-      }
-      combinedRevenueByDate[date].sales += r.total_amount || 0
-      combinedRevenueByDate[date].total += r.total_amount || 0
-    })
-
-    // Add revenue reports (front office)
+    // Add front office revenue
+    let frontOfficeTotal = 0
     ;(revenueReports.data || []).forEach(r => {
       const date = r.report_date
       if (!combinedRevenueByDate[date]) {
@@ -134,9 +128,27 @@ export default function RevenueAnalyticsPage() {
       combinedRevenueByDate[date].laundry += r.laundry_revenue || 0
       combinedRevenueByDate[date].other += (r.food_beverage_revenue || 0) + (r.other_services_revenue || 0)
       combinedRevenueByDate[date].total += r.total_revenue || 0
+      frontOfficeTotal += r.total_revenue || 0
     })
 
-    // Convert to array
+    // Add manager sales revenue
+    let salesTotal = 0
+    ;(stockReports.data || []).forEach(r => {
+      const date = r.report_date
+      if (!combinedRevenueByDate[date]) {
+        combinedRevenueByDate[date] = { total: 0, room: 0, laundry: 0, other: 0, sales: 0 }
+      }
+      const salesRevenue = (r.cash_payments || 0) + (r.card_payments || 0) + (r.transfer_payments || 0)
+      combinedRevenueByDate[date].sales += salesRevenue
+      combinedRevenueByDate[date].total += salesRevenue
+      salesTotal += salesRevenue
+    })
+
+    console.log('💰 Front office revenue total:', frontOfficeTotal)
+    console.log('💰 Sales revenue total:', salesTotal)
+    console.log('💰 Combined total revenue:', frontOfficeTotal + salesTotal)
+
+    // Convert to DailyRevenue array
     const dailyRevenue: DailyRevenue[] = Object.keys(combinedRevenueByDate)
       .sort()
       .map(date => ({
@@ -144,45 +156,36 @@ export default function RevenueAnalyticsPage() {
         total: combinedRevenueByDate[date].total,
         room: combinedRevenueByDate[date].room,
         laundry: combinedRevenueByDate[date].laundry,
-        other: combinedRevenueByDate[date].other + combinedRevenueByDate[date].sales, // Combine sales with other
+        other: combinedRevenueByDate[date].other + combinedRevenueByDate[date].sales,
       }))
 
-    const breakdown = calculateRevenueBreakdown(dailyRevenue)
-    const occupancy = processOccupancy(occupancies.data || [])
-    const insights = generateRevenueInsights(dailyRevenue, occupancies.data || [])
-    const forecast = generateForecast(dailyRevenue)
-    const weekdayAnalysis = analyzeWeekdays(dailyRevenue)
-    const { peakDays, lowDays } = identifyPeakAndLowDays(dailyRevenue, occupancies.data || [])
+    console.log('📊 Daily revenue array:', dailyRevenue)
 
-    setData({
-      dailyRevenue,
-      revenueBreakdown: breakdown,
-      occupancyData: occupancy,
-      insights,
-      forecast,
-      weekdayAnalysis,
-      peakDays,
-      lowDays,
-    })
-  } catch (error) {
-    console.error('Error loading revenue data:', error)
-  } finally {
-    setLoading(false)
+    // Rest of the code stays the same...
+
+      const breakdown = calculateRevenueBreakdown(dailyRevenue)
+      const occupancy = processOccupancy(occupancies.data || [])
+      const insights = generateRevenueInsights(dailyRevenue, occupancies.data || [])
+      const forecast = generateForecast(dailyRevenue)
+      const weekdayAnalysis = analyzeWeekdays(dailyRevenue)
+      const { peakDays, lowDays } = identifyPeakAndLowDays(dailyRevenue, occupancies.data || [])
+
+      setData({
+        dailyRevenue,
+        revenueBreakdown: breakdown,
+        occupancyData: occupancy,
+        insights,
+        forecast,
+        weekdayAnalysis,
+        peakDays,
+        lowDays,
+      })
+    } catch (error) {
+      console.error('Error loading revenue data:', error)
+    } finally {
+      setLoading(false)
+    }
   }
-}
-
-const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdown => {
-  const total = dailyRevenue.reduce((sum, d) => sum + d.total, 0)
-  const room = dailyRevenue.reduce((sum, d) => sum + d.room, 0)
-  const laundry = dailyRevenue.reduce((sum, d) => sum + d.laundry, 0)
-  const other = dailyRevenue.reduce((sum, d) => sum + d.other, 0)
-
-  return {
-    room: { amount: room, percentage: total > 0 ? (room / total) * 100 : 0 },
-    laundry: { amount: laundry, percentage: total > 0 ? (laundry / total) * 100 : 0 },
-    other: { amount: other, percentage: total > 0 ? (other / total) * 100 : 0 },
-  }
-}
 
   const getDateRange = () => {
     const today = new Date()
@@ -193,21 +196,11 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
     }
   }
 
-  const processDailyRevenue = (revenues: any[]): DailyRevenue[] => {
-    return revenues.map(r => ({
-      date: r.report_date,
-      total: r.total_revenue || 0,
-      room: r.room_revenue || 0,
-      laundry: r.laundry_revenue || 0,
-      other: (r.other_services_revenue || 0),
-    }))
-  }
-
-  const calculateRevenueBreakdown = (revenues: any[]): RevenueBreakdown => {
-    const total = revenues.reduce((sum, r) => sum + (r.total_revenue || 0), 0)
-    const room = revenues.reduce((sum, r) => sum + (r.room_revenue || 0), 0)
-    const laundry = revenues.reduce((sum, r) => sum + (r.laundry_revenue || 0), 0)
-    const other = revenues.reduce((sum, r) => sum + (r.other_services_revenue || 0), 0)
+  const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdown => {
+    const total = dailyRevenue.reduce((sum, d) => sum + d.total, 0)
+    const room = dailyRevenue.reduce((sum, d) => sum + d.room, 0)
+    const laundry = dailyRevenue.reduce((sum, d) => sum + d.laundry, 0)
+    const other = dailyRevenue.reduce((sum, d) => sum + d.other, 0)
 
     return {
       room: { amount: room, percentage: total > 0 ? (room / total) * 100 : 0 },
@@ -225,21 +218,21 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
     }))
   }
 
-  const generateRevenueInsights = (revenues: any[], occupancies: any[]): RevenueInsight[] => {
+  const generateRevenueInsights = (dailyRevenue: DailyRevenue[], occupancies: any[]): RevenueInsight[] => {
     const insights: RevenueInsight[] = []
 
     // Calculate averages
-    const avgRevenue = revenues.length > 0 
-      ? revenues.reduce((sum, r) => sum + (r.total_revenue || 0), 0) / revenues.length 
+    const avgRevenue = dailyRevenue.length > 0 
+      ? dailyRevenue.reduce((sum, r) => sum + r.total, 0) / dailyRevenue.length 
       : 0
     const avgOccupancy = occupancies.length > 0
       ? occupancies.reduce((sum, o) => sum + (o.occupancy_percentage || 0), 0) / occupancies.length
       : 0
 
     // Revenue trend
-    const recentRevenues = revenues.slice(-7)
+    const recentRevenues = dailyRevenue.slice(-7)
     const recentAvg = recentRevenues.length > 0
-      ? recentRevenues.reduce((s, r) => s + (r.total_revenue || 0), 0) / recentRevenues.length
+      ? recentRevenues.reduce((s, r) => s + r.total, 0) / recentRevenues.length
       : 0
     const growth = avgRevenue > 0 ? ((recentAvg - avgRevenue) / avgRevenue) * 100 : 0
 
@@ -262,8 +255,8 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
     }
 
     // Room revenue dominance
-    const totalRevenue = revenues.reduce((sum, r) => sum + (r.total_revenue || 0), 0)
-    const roomRevenue = revenues.reduce((sum, r) => sum + (r.room_revenue || 0), 0)
+    const totalRevenue = dailyRevenue.reduce((sum, r) => sum + r.total, 0)
+    const roomRevenue = dailyRevenue.reduce((sum, r) => sum + r.room, 0)
     const roomPercentage = totalRevenue > 0 ? (roomRevenue / totalRevenue) * 100 : 0
 
     if (roomPercentage > 85) {
@@ -278,7 +271,8 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
 
     // Occupancy-revenue correlation
     if (avgOccupancy > 70 && avgRevenue > 0) {
-      const adr = roomRevenue / occupancies.reduce((sum, o) => sum + (o.occupied_rooms || 0), 0)
+      const totalRoomNights = occupancies.reduce((sum, o) => sum + (o.occupied_rooms || 0), 0)
+      const adr = totalRoomNights > 0 ? roomRevenue / totalRoomNights : 0
       insights.push({
         id: '4',
         type: 'positive',
@@ -296,43 +290,11 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
       })
     }
 
-    // Weekend vs weekday
-    const weekendRevenues = revenues.filter(r => {
-      const day = new Date(r.report_date).getDay()
-      return day === 0 || day === 6 // Sunday or Saturday
-    })
-    const weekdayRevenues = revenues.filter(r => {
-      const day = new Date(r.report_date).getDay()
-      return day > 0 && day < 6
-    })
-    const weekendAvg = weekendRevenues.length > 0
-      ? weekendRevenues.reduce((s, r) => s + (r.total_revenue || 0), 0) / weekendRevenues.length
-      : 0
-    const weekdayAvg = weekdayRevenues.length > 0
-      ? weekdayRevenues.reduce((s, r) => s + (r.total_revenue || 0), 0) / weekdayRevenues.length
-      : 0
-
-    if (weekendAvg > weekdayAvg * 1.3) {
-      insights.push({
-        id: '6',
-        type: 'neutral',
-        title: 'Weekend Revenue Surge',
-        description: `Weekends generate ${((weekendAvg / weekdayAvg - 1) * 100).toFixed(0)}% more revenue than weekdays. Consider weekend packages and promotions.`,
-      })
-    } else if (weekdayAvg > weekendAvg * 1.2) {
-      insights.push({
-        id: '7',
-        type: 'neutral',
-        title: 'Strong Weekday Performance',
-        description: 'Business travelers are driving weekday revenue. Partner with corporate clients for long-term contracts.',
-      })
-    }
-
     return insights
   }
 
-  const generateForecast = (revenues: any[]): ForecastData => {
-    if (revenues.length < 7) {
+  const generateForecast = (dailyRevenue: DailyRevenue[]): ForecastData => {
+    if (dailyRevenue.length < 7) {
       return {
         nextWeekRevenue: 0,
         confidence: 0,
@@ -341,12 +303,11 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
       }
     }
 
-    // Simple moving average forecast
-    const last7Days = revenues.slice(-7)
-    const avgLast7 = last7Days.reduce((s, r) => s + (r.total_revenue || 0), 0) / 7
-    const previous7Days = revenues.slice(-14, -7)
+    const last7Days = dailyRevenue.slice(-7)
+    const avgLast7 = last7Days.reduce((s, r) => s + r.total, 0) / 7
+    const previous7Days = dailyRevenue.slice(-14, -7)
     const avgPrev7 = previous7Days.length > 0
-      ? previous7Days.reduce((s, r) => s + (r.total_revenue || 0), 0) / previous7Days.length
+      ? previous7Days.reduce((s, r) => s + r.total, 0) / previous7Days.length
       : avgLast7
 
     const growth = avgPrev7 > 0 ? ((avgLast7 - avgPrev7) / avgPrev7) : 0
@@ -356,7 +317,7 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
     if (growth > 0.05) trend = 'up'
     else if (growth < -0.05) trend = 'down'
 
-    const confidence = revenues.length >= 30 ? 85 : revenues.length >= 14 ? 70 : 55
+    const confidence = dailyRevenue.length >= 30 ? 85 : dailyRevenue.length >= 14 ? 70 : 55
 
     let reasoning = ''
     if (trend === 'up') {
@@ -370,12 +331,12 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
     return { nextWeekRevenue, confidence, trend, reasoning }
   }
 
-  const analyzeWeekdays = (revenues: any[]): WeekdayAnalysis => {
+  const analyzeWeekdays = (dailyRevenue: DailyRevenue[]): WeekdayAnalysis => {
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
     const byDay = dayNames.map((day, index) => {
-      const dayRevenues = revenues.filter(r => new Date(r.report_date).getDay() === index)
+      const dayRevenues = dailyRevenue.filter(r => new Date(r.date).getDay() === index)
       const avgRevenue = dayRevenues.length > 0
-        ? dayRevenues.reduce((s, r) => s + (r.total_revenue || 0), 0) / dayRevenues.length
+        ? dayRevenues.reduce((s, r) => s + r.total, 0) / dayRevenues.length
         : 0
       return { day, avgRevenue }
     })
@@ -389,13 +350,13 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
     }
   }
 
-  const identifyPeakAndLowDays = (revenues: any[], occupancies: any[]) => {
-    const sorted = [...revenues].sort((a, b) => (b.total_revenue || 0) - (a.total_revenue || 0))
+  const identifyPeakAndLowDays = (dailyRevenue: DailyRevenue[], occupancies: any[]) => {
+    const sorted = [...dailyRevenue].sort((a, b) => b.total - a.total)
     
     const peakDays = sorted.slice(0, 3).map(r => {
-      const occ = occupancies.find(o => o.report_date === r.report_date)
+      const occ = occupancies.find(o => o.report_date === r.date)
       let reason = ''
-      const dayName = format(new Date(r.report_date), 'EEEE')
+      const dayName = format(new Date(r.date), 'EEEE')
       if (dayName === 'Friday' || dayName === 'Saturday') {
         reason = 'Weekend demand'
       } else if (occ && occ.occupancy_percentage > 85) {
@@ -403,18 +364,18 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
       } else {
         reason = 'Strong performance'
       }
-      return { date: r.report_date, revenue: r.total_revenue || 0, reason }
+      return { date: r.date, revenue: r.total, reason }
     })
 
     const lowDays = sorted.slice(-3).reverse().map(r => {
-      const occ = occupancies.find(o => o.report_date === r.report_date)
+      const occ = occupancies.find(o => o.report_date === r.date)
       let reason = ''
       if (occ && occ.occupancy_percentage < 40) {
         reason = 'Low occupancy'
       } else {
         reason = 'Below average performance'
       }
-      return { date: r.report_date, revenue: r.total_revenue || 0, reason }
+      return { date: r.date, revenue: r.total, reason }
     })
 
     return { peakDays, lowDays }
@@ -457,14 +418,12 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
       <div>
         <h4 className="text-sm font-semibold text-gray-700 mb-3">{title}</h4>
         <div className="relative h-48 bg-gray-50 rounded-lg p-4">
-          {/* Y-axis labels */}
           <div className="absolute left-0 top-0 bottom-0 flex flex-col justify-between text-xs text-gray-500 pr-2">
             <span>₦{maxValue.toLocaleString('en-NG', { maximumFractionDigits: 0 })}</span>
             <span>₦{((maxValue + minValue) / 2).toLocaleString('en-NG', { maximumFractionDigits: 0 })}</span>
             <span>₦{minValue.toLocaleString('en-NG', { maximumFractionDigits: 0 })}</span>
           </div>
 
-          {/* Chart area */}
           <div className="ml-16 h-full flex items-end space-x-1">
             {data.map((point, index) => {
               const heightPercent = ((point.value - minValue) / range) * 100
@@ -474,7 +433,6 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
                     className="bg-primary hover:bg-primary-dark transition-all rounded-t cursor-pointer"
                     style={{ height: `${heightPercent}%` }}
                   >
-                    {/* Tooltip on hover */}
                     <div className="hidden group-hover:block absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-2 py-1 rounded whitespace-nowrap z-10">
                       {format(new Date(point.date), 'MMM dd')}
                       <br />
@@ -496,33 +454,11 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
     )
   }
 
-  <DonutChart
-  data={[
-    {
-      label: 'Room Revenue',
-      value: data.revenueBreakdown.room.amount,
-      percentage: data.revenueBreakdown.room.percentage,
-      color: '#10b981',
-    },
-    {
-      label: 'Laundry Services',
-      value: data.revenueBreakdown.laundry.amount,
-      percentage: data.revenueBreakdown.laundry.percentage,
-      color: '#3b82f6',
-    },
-    {
-      label: 'Sales & Other Services',  // UPDATED LABEL
-      value: data.revenueBreakdown.other.amount,
-      percentage: data.revenueBreakdown.other.percentage,
-      color: '#8b5cf6',
-    },
-  ]}
-/>
+  const DonutChart = ({ data }: { data: { label: string; value: number; percentage: number; color: string }[] }) => {
     let cumulativePercentage = 0
 
     return (
       <div className="flex items-center space-x-6">
-        {/* Donut */}
         <div className="relative w-40 h-40">
           <svg viewBox="0 0 100 100" className="transform -rotate-90">
             {data.map((item, index) => {
@@ -530,7 +466,6 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
               const endAngle = ((cumulativePercentage + item.percentage) / 100) * 360
               cumulativePercentage += item.percentage
 
-              // SVG path for donut segment
               const startX = 50 + 40 * Math.cos((startAngle * Math.PI) / 180)
               const startY = 50 + 40 * Math.sin((startAngle * Math.PI) / 180)
               const endX = 50 + 40 * Math.cos((endAngle * Math.PI) / 180)
@@ -547,7 +482,6 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
                 />
               )
             })}
-            {/* Center white circle */}
             <circle cx="50" cy="50" r="25" fill="white" />
           </svg>
           <div className="absolute inset-0 flex items-center justify-center">
@@ -558,7 +492,6 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
           </div>
         </div>
 
-        {/* Legend */}
         <div className="space-y-2 flex-1">
           {data.map((item, index) => (
             <div key={index} className="flex items-center justify-between">
@@ -596,7 +529,6 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
 
   return (
     <div className="p-8 max-w-7xl mx-auto">
-      {/* Header */}
       <div className="mb-8">
         <Link href="/bdm/analytics" className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-4 text-sm">
           <ArrowLeft className="w-4 h-4 mr-2" />
@@ -608,7 +540,6 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
             <p className="text-gray-600">Deep insights into revenue trends and opportunities</p>
           </div>
           
-          {/* Date Range */}
           <div className="flex items-center space-x-2">
             {[
               { value: '7d' as const, label: 'Last 7 Days' },
@@ -629,7 +560,6 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
         </div>
       </div>
 
-      {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <div className="card bg-gradient-to-br from-green-50 to-emerald-50 border-green-200">
           <div className="text-sm text-gray-600 mb-1">Total Revenue</div>
@@ -673,7 +603,6 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
         </div>
       </div>
 
-      {/* Forecast Insight */}
       <div className="mb-8 p-4 bg-blue-50 border-l-4 border-blue-500 rounded-lg">
         <div className="flex items-start space-x-3">
           <Lightbulb className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
@@ -684,7 +613,6 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
         </div>
       </div>
 
-      {/* Revenue Insights */}
       {data.insights.length > 0 && (
         <div className="mb-8">
           <h2 className="text-xl font-bold text-gray-900 mb-4">Key Insights</h2>
@@ -725,9 +653,7 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
         </div>
       )}
 
-      {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        {/* Daily Revenue Trend */}
         <div className="card">
           <LineChart
             data={data.dailyRevenue.map(d => ({ date: d.date, value: d.total }))}
@@ -742,7 +668,6 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
           </div>
         </div>
 
-        {/* Revenue Breakdown */}
         <div className="card">
           <h4 className="text-sm font-semibold text-gray-700 mb-4">Revenue Sources</h4>
           <DonutChart
@@ -760,7 +685,7 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
                 color: '#3b82f6',
               },
               {
-                label: 'Other Services',
+                label: 'Sales & Other Services',
                 value: data.revenueBreakdown.other.amount,
                 percentage: data.revenueBreakdown.other.percentage,
                 color: '#8b5cf6',
@@ -777,7 +702,6 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
           </div>
         </div>
 
-        {/* Weekday Analysis */}
         <div className="card">
           <SimpleBarChart
             data={data.weekdayAnalysis.byDay.map(d => ({
@@ -796,7 +720,6 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
           </div>
         </div>
 
-        {/* Occupancy Correlation */}
         <div className="card">
           <h4 className="text-sm font-semibold text-gray-700 mb-3">Occupancy Rate Trend</h4>
           <div className="space-y-2">
@@ -826,9 +749,7 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
         </div>
       </div>
 
-      {/* Peak and Low Days */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-        {/* Peak Days */}
         <div className="card bg-green-50 border-green-200">
           <h3 className="text-lg font-bold text-green-900 mb-4">🌟 Top Revenue Days</h3>
           <div className="space-y-3">
@@ -849,7 +770,6 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
           </div>
         </div>
 
-        {/* Low Days */}
         <div className="card bg-orange-50 border-orange-200">
           <h3 className="text-lg font-bold text-orange-900 mb-4">⚠️ Lowest Revenue Days</h3>
           <div className="space-y-3">
@@ -871,7 +791,6 @@ const calculateRevenueBreakdown = (dailyRevenue: DailyRevenue[]): RevenueBreakdo
         </div>
       </div>
 
-      {/* Action Recommendations */}
       <div className="card bg-gradient-to-br from-purple-50 to-pink-50 border-purple-200">
         <h3 className="text-lg font-bold text-purple-900 mb-4 flex items-center">
           <Target className="w-5 h-5 mr-2" />
