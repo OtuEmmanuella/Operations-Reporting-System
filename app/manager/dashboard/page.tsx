@@ -93,19 +93,13 @@ export default function ManagerDashboard() {
 
   const quickActions = [
     {
-      title: 'Submit Stock & Inventory',
+      title: 'Submit Stock & Sales Report',
       description: 'Daily stock movement & sales',
       icon: Package,
       href: '/manager/stock-report',
       color: 'bg-blue-500',
     },
-    {
-      title: 'Submit Sales Report',
-      description: 'Record today\'s sales details',
-      icon: DollarSign,
-      href: '/manager/sales-report',
-      color: 'bg-green-500',
-    },
+   
   ]
 
   const getStatusIcon = (status: string) => {

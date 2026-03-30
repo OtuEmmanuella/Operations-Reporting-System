@@ -96,7 +96,7 @@ export default function Sidebar() {
       {
         label: 'Submit Reports', icon: FileText,
         items: [
-          { href: '/manager/stock-report', label: 'Stock & Inventory', icon: Package },
+          { href: '/manager/stock-report', label: 'Stock & Sales', icon: Package },
           
         ],
       },
@@ -117,6 +117,8 @@ export default function Sidebar() {
           { href: '/bdm/dashboard', label: 'Dashboard', icon: Home },
           { href: '/bdm/managers', label: 'Managers', icon: Users },
           { href: '/bdm/analytics', label: 'Analytics', icon: BarChart3 },
+          { href: '/bdm/analytics/branch-performance', label: 'Branch Performance', icon: TrendingUp }, 
+          { href: '/bdm/analytics/multi-branch-sales-overview', label: 'Multi-Branch Sales Overview', icon: Package }
         ],
       },
       {
@@ -174,7 +176,7 @@ export default function Sidebar() {
     
     // Otherwise fallback to role-based labels
     const roleLabels: Record<string, string> = {
-      manager: 'Store Manager',
+      manager: 'Manager',
       bdm: 'Business Dev. Manager',
       front_office_manager: 'Front Office Manager'
     }

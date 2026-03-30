@@ -113,30 +113,48 @@ export default function RevenueAnalyticsPage() {
       total: number
       room: number
       laundry: number
-      other: number
+      foodBeverage: number
+      otherServices: number
       sales: number
     }> = {}
 
     // Add front office revenue
     let frontOfficeTotal = 0
-    ;(revenueReports.data || []).forEach(r => {
+    const frontOfficeReports = revenueReports.data || []
+    frontOfficeReports.forEach((r: any) => {
       const date = r.report_date
       if (!combinedRevenueByDate[date]) {
-        combinedRevenueByDate[date] = { total: 0, room: 0, laundry: 0, other: 0, sales: 0 }
+        combinedRevenueByDate[date] = { 
+          total: 0, 
+          room: 0, 
+          laundry: 0, 
+          foodBeverage: 0,
+          otherServices: 0,
+          sales: 0 
+        }
       }
       combinedRevenueByDate[date].room += r.room_revenue || 0
       combinedRevenueByDate[date].laundry += r.laundry_revenue || 0
-      combinedRevenueByDate[date].other += (r.food_beverage_revenue || 0) + (r.other_services_revenue || 0)
+      combinedRevenueByDate[date].foodBeverage += r.food_beverage_revenue || 0
+      combinedRevenueByDate[date].otherServices += r.other_services_revenue || 0
       combinedRevenueByDate[date].total += r.total_revenue || 0
       frontOfficeTotal += r.total_revenue || 0
     })
 
     // Add manager sales revenue
     let salesTotal = 0
-    ;(stockReports.data || []).forEach(r => {
+    const stockReportsData = stockReports.data || []
+    stockReportsData.forEach((r: any) => {
       const date = r.report_date
       if (!combinedRevenueByDate[date]) {
-        combinedRevenueByDate[date] = { total: 0, room: 0, laundry: 0, other: 0, sales: 0 }
+        combinedRevenueByDate[date] = { 
+          total: 0, 
+          room: 0, 
+          laundry: 0, 
+          foodBeverage: 0,
+          otherServices: 0,
+          sales: 0 
+        }
       }
       const salesRevenue = (r.cash_payments || 0) + (r.card_payments || 0) + (r.transfer_payments || 0)
       combinedRevenueByDate[date].sales += salesRevenue
@@ -156,36 +174,36 @@ export default function RevenueAnalyticsPage() {
         total: combinedRevenueByDate[date].total,
         room: combinedRevenueByDate[date].room,
         laundry: combinedRevenueByDate[date].laundry,
-        other: combinedRevenueByDate[date].other + combinedRevenueByDate[date].sales,
+        other: combinedRevenueByDate[date].foodBeverage + 
+               combinedRevenueByDate[date].otherServices + 
+               combinedRevenueByDate[date].sales,
       }))
 
     console.log('📊 Daily revenue array:', dailyRevenue)
 
-    // Rest of the code stays the same...
+    const breakdown = calculateRevenueBreakdown(dailyRevenue)
+    const occupancy = processOccupancy(occupancies.data || [])
+    const insights = generateRevenueInsights(dailyRevenue, occupancies.data || [])
+    const forecast = generateForecast(dailyRevenue)
+    const weekdayAnalysis = analyzeWeekdays(dailyRevenue)
+    const { peakDays, lowDays } = identifyPeakAndLowDays(dailyRevenue, occupancies.data || [])
 
-      const breakdown = calculateRevenueBreakdown(dailyRevenue)
-      const occupancy = processOccupancy(occupancies.data || [])
-      const insights = generateRevenueInsights(dailyRevenue, occupancies.data || [])
-      const forecast = generateForecast(dailyRevenue)
-      const weekdayAnalysis = analyzeWeekdays(dailyRevenue)
-      const { peakDays, lowDays } = identifyPeakAndLowDays(dailyRevenue, occupancies.data || [])
-
-      setData({
-        dailyRevenue,
-        revenueBreakdown: breakdown,
-        occupancyData: occupancy,
-        insights,
-        forecast,
-        weekdayAnalysis,
-        peakDays,
-        lowDays,
-      })
-    } catch (error) {
-      console.error('Error loading revenue data:', error)
-    } finally {
-      setLoading(false)
-    }
+    setData({
+      dailyRevenue,
+      revenueBreakdown: breakdown,
+      occupancyData: occupancy,
+      insights,
+      forecast,
+      weekdayAnalysis,
+      peakDays,
+      lowDays,
+    })
+  } catch (error) {
+    console.error('Error loading revenue data:', error)
+  } finally {
+    setLoading(false)
   }
+}
 
   const getDateRange = () => {
     const today = new Date()
@@ -294,42 +312,62 @@ export default function RevenueAnalyticsPage() {
   }
 
   const generateForecast = (dailyRevenue: DailyRevenue[]): ForecastData => {
-    if (dailyRevenue.length < 7) {
-      return {
-        nextWeekRevenue: 0,
-        confidence: 0,
-        trend: 'stable',
-        reasoning: 'Insufficient data for forecasting',
-      }
+  // ✅ LOWERED MINIMUM FROM 7 DAYS (was 30)
+  if (dailyRevenue.length < 3) {
+    return {
+      nextWeekRevenue: 0,
+      confidence: 0,
+      trend: 'stable',
+      reasoning: 'Need at least 3 days of data for forecasting. Keep submitting reports!',
     }
-
-    const last7Days = dailyRevenue.slice(-7)
-    const avgLast7 = last7Days.reduce((s, r) => s + r.total, 0) / 7
-    const previous7Days = dailyRevenue.slice(-14, -7)
-    const avgPrev7 = previous7Days.length > 0
-      ? previous7Days.reduce((s, r) => s + r.total, 0) / previous7Days.length
-      : avgLast7
-
-    const growth = avgPrev7 > 0 ? ((avgLast7 - avgPrev7) / avgPrev7) : 0
-    const nextWeekRevenue = avgLast7 * 7 * (1 + growth)
-
-    let trend: 'up' | 'down' | 'stable' = 'stable'
-    if (growth > 0.05) trend = 'up'
-    else if (growth < -0.05) trend = 'down'
-
-    const confidence = dailyRevenue.length >= 30 ? 85 : dailyRevenue.length >= 14 ? 70 : 55
-
-    let reasoning = ''
-    if (trend === 'up') {
-      reasoning = `Based on recent ${(growth * 100).toFixed(1)}% growth trend, revenue is expected to increase next week.`
-    } else if (trend === 'down') {
-      reasoning = `Recent ${(Math.abs(growth) * 100).toFixed(1)}% decline suggests lower revenue next week unless corrective actions are taken.`
-    } else {
-      reasoning = 'Revenue is stable. Expected to maintain current levels next week.'
-    }
-
-    return { nextWeekRevenue, confidence, trend, reasoning }
   }
+
+  // Use last 7 days or whatever we have
+  const daysToUse = Math.min(7, dailyRevenue.length)
+  const last7Days = dailyRevenue.slice(-daysToUse)
+  const avgLast7 = last7Days.reduce((s, r) => s + r.total, 0) / daysToUse
+
+  // ✅ IMPROVED: Compare with previous period (or same data if not enough)
+  const previousDays = dailyRevenue.length >= daysToUse * 2
+    ? dailyRevenue.slice(-(daysToUse * 2), -daysToUse)
+    : last7Days
+  
+  const avgPrev = previousDays.length > 0
+    ? previousDays.reduce((s, r) => s + r.total, 0) / previousDays.length
+    : avgLast7
+
+  const growth = avgPrev > 0 ? ((avgLast7 - avgPrev) / avgPrev) : 0
+  
+  // Project next week based on trend
+  const nextWeekRevenue = avgLast7 * 7 * (1 + growth)
+
+  // Determine trend
+  let trend: 'up' | 'down' | 'stable' = 'stable'
+  if (growth > 0.05) trend = 'up'
+  else if (growth < -0.05) trend = 'down'
+
+  // ✅ IMPROVED CONFIDENCE SCORING
+  const confidence = dailyRevenue.length >= 30 ? 90 :
+                     dailyRevenue.length >= 14 ? 80 :
+                     dailyRevenue.length >= 7  ? 70 :
+                     50  // Even with 3-6 days, give some confidence
+
+  // ✅ BETTER REASONING
+  let reasoning = ''
+  if (dailyRevenue.length < 7) {
+    reasoning = `Based on ${dailyRevenue.length} days of data. Revenue trending ${
+      trend === 'up' ? 'upward' : trend === 'down' ? 'downward' : 'stable'
+    }. More data will improve accuracy.`
+  } else if (trend === 'up') {
+    reasoning = `Based on recent ${(growth * 100).toFixed(1)}% growth trend, revenue is expected to increase next week.`
+  } else if (trend === 'down') {
+    reasoning = `Recent ${(Math.abs(growth) * 100).toFixed(1)}% decline suggests lower revenue next week unless corrective actions are taken.`
+  } else {
+    reasoning = 'Revenue is stable. Expected to maintain current levels next week.'
+  }
+
+  return { nextWeekRevenue, confidence, trend, reasoning }
+}
 
   const analyzeWeekdays = (dailyRevenue: DailyRevenue[]): WeekdayAnalysis => {
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']

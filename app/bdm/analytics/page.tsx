@@ -5,38 +5,29 @@ import { supabase } from '@/lib/supabase'
 import { 
   TrendingUp, TrendingDown, DollarSign, Hotel, Users, Clock, 
   AlertCircle, ArrowRight, Lightbulb, Target, Award, Zap, 
-  Calendar, ChevronDown, Info, CheckCircle, XCircle, X, Package, Mail
+  Calendar, ChevronDown, ChevronUp, Info, CheckCircle, X, Package, Mail
 } from 'lucide-react'
-import { format, subDays, startOfMonth, endOfMonth, differenceInHours, eachDayOfInterval } from 'date-fns'
+import { format, subDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek, differenceInHours, eachDayOfInterval } from 'date-fns'
 import Link from 'next/link'
 
 interface DashboardData {
-  // Core KPIs
   totalRevenue: number
   revenueGrowth: number
   avgOccupancy: number
   occupancyTrend: number
   adr: number
   revpar: number
-  
-  // Manager Performance
   managerCompliance: number
   avgApprovalTime: number
   rejectionRate: number
   topPerformerName: string
   topPerformerScore: number
-  
-  // Alerts & Insights
   criticalAlerts: Alert[]
   smartInsights: Insight[]
   recommendations: Recommendation[]
-  
-  // Quick Stats
   totalReports: number
   pendingReports: number
   complaintsToday: number
-  
-  // Inventory Insights
   topSellingItems: TopSellingItem[]
 }
 
@@ -83,26 +74,85 @@ interface MissingReport {
   total_missing: number
 }
 
+type DateRangeOption = 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'custom'
+
 export default function AnalyticsDashboard() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<DashboardData | null>(null)
-  const [dateRange, setDateRange] = useState<'today' | '7d' | '30d'>('7d')
-  const [showTooltip, setShowTooltip] = useState<string | null>(null)
   const [showMissingReportsModal, setShowMissingReportsModal] = useState(false)
   const [missingReports, setMissingReports] = useState<MissingReport[]>([])
+  const [topItemsExpanded, setTopItemsExpanded] = useState(false)
+
+  // Date range state
+  const [dateRangeOption, setDateRangeOption] = useState<DateRangeOption>('this_week')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [showCustomDates, setShowCustomDates] = useState(false)
 
   useEffect(() => {
-    loadDashboard()
-  }, [dateRange])
+    updateDateRange('this_week')
+  }, [])
+
+  useEffect(() => {
+    if (startDate && endDate) {
+      loadDashboard()
+    }
+  }, [startDate, endDate])
+
+  const updateDateRange = (option: DateRangeOption) => {
+    const today = new Date()
+    let start: Date
+    let end: Date
+
+    switch (option) {
+      case 'today':
+        start = today; end = today; break
+      case 'yesterday':
+        start = subDays(today, 1); end = subDays(today, 1); break
+      case 'this_week':
+        start = startOfWeek(today, { weekStartsOn: 1 })
+        end = endOfWeek(today, { weekStartsOn: 1 })
+        break
+      case 'last_week': {
+        const lastWeek = subDays(today, 7)
+        start = startOfWeek(lastWeek, { weekStartsOn: 1 })
+        end = endOfWeek(lastWeek, { weekStartsOn: 1 })
+        break
+      }
+      case 'this_month':
+        start = startOfMonth(today); end = endOfMonth(today); break
+      case 'last_month': {
+        const lastMonth = subDays(startOfMonth(today), 1)
+        start = startOfMonth(lastMonth); end = endOfMonth(lastMonth)
+        break
+      }
+      case 'custom':
+        setShowCustomDates(true)
+        setDateRangeOption('custom')
+        return
+      default:
+        start = startOfWeek(today, { weekStartsOn: 1 })
+        end = endOfWeek(today, { weekStartsOn: 1 })
+    }
+
+    setStartDate(format(start, 'yyyy-MM-dd'))
+    setEndDate(format(end, 'yyyy-MM-dd'))
+    setShowCustomDates(false)
+    setDateRangeOption(option)
+  }
+
+  const handleCustomDateApply = () => {
+    if (startDate && endDate) {
+      setDateRangeOption('custom')
+      setShowCustomDates(false)
+      loadDashboard()
+    }
+  }
 
   const loadDashboard = async () => {
+    if (!startDate || !endDate) return
     setLoading(true)
     try {
-      const { start, end } = getDateRange()
-      const startDate = format(start, 'yyyy-MM-dd')
-      const endDate = format(end, 'yyyy-MM-dd')
-
-      // Load all data in parallel - INCLUDE stock_inventory_reports for sales revenue
       const [managers, revenues, stockReports, occupancies, allReports, complaints] = await Promise.all([
         supabase.from('users').select('*').in('role', ['manager', 'front_office_manager']),
         supabase.from('revenue_reports').select('*').gte('report_date', startDate).lte('report_date', endDate),
@@ -112,19 +162,18 @@ export default function AnalyticsDashboard() {
         supabase.from('complaint_reports').select('*').eq('report_date', format(new Date(), 'yyyy-MM-dd')),
       ])
 
-      // Load inventory insights
       const inventoryInsights = await loadInventoryInsights(startDate, endDate)
 
-      // Calculate KPIs with COMBINED revenue (front office + manager sales)
       const kpis = calculateKPIs(
         revenues.data || [],
         stockReports.data || [],
         occupancies.data || [],
         allReports,
-        managers.data || []
+        managers.data || [],
+        startDate,
+        endDate,
       )
 
-      // Generate insights and recommendations
       const insights = generateInsights(kpis, revenues.data || [], occupancies.data || [], inventoryInsights)
       const recommendations = generateRecommendations(kpis, inventoryInsights)
       const alerts = generateAlerts(kpis, complaints.data || [])
@@ -135,7 +184,7 @@ export default function AnalyticsDashboard() {
         smartInsights: insights,
         recommendations,
         totalReports: allReports.length,
-        pendingReports: allReports.filter(r => r.status === 'pending').length,
+        pendingReports: allReports.filter((r: any) => r.status === 'pending').length,
         complaintsToday: complaints.data?.length || 0,
         topSellingItems: inventoryInsights.topSellingItems,
       })
@@ -147,31 +196,20 @@ export default function AnalyticsDashboard() {
   }
 
   const loadMissingReports = async () => {
+    if (!startDate || !endDate) return
     try {
-      const { start, end } = getDateRange()
-      const startDate = format(start, 'yyyy-MM-dd')
-      const endDate = format(end, 'yyyy-MM-dd')
-
-      // Get all managers with email
+      const start = new Date(startDate)
+      const end = new Date(endDate)
       const { data: managers } = await supabase
-        .from('users')
-        .select('*')
-        .in('role', ['manager', 'front_office_manager'])
-
-      // Get date range
+        .from('users').select('*').in('role', ['manager', 'front_office_manager'])
       const dateArray = eachDayOfInterval({ start, end }).map(d => format(d, 'yyyy-MM-dd'))
-
-      // Load all reports
       const allReports = await loadAllReports(startDate, endDate)
-
       const missing: MissingReport[] = []
 
-      managers?.forEach(manager => {
-        const managerReports = allReports.filter(r => r.manager_id === manager.id)
-        const reportedDates = new Set(managerReports.map(r => r.report_date))
-
+      managers?.forEach((manager: any) => {
+        const managerReports = (allReports as any[]).filter((r: any) => r.manager_id === manager.id)
+        const reportedDates = new Set(managerReports.map((r: any) => r.report_date))
         const missingDates = dateArray.filter(date => !reportedDates.has(date))
-
         if (missingDates.length > 0) {
           missing.push({
             manager_id: manager.id,
@@ -192,161 +230,99 @@ export default function AnalyticsDashboard() {
     }
   }
 
-  const loadInventoryInsights = async (startDate: string, endDate: string) => {
+  const loadInventoryInsights = async (start: string, end: string) => {
     try {
-      // Get all sales items from stock_inventory_items
       const { data: salesItems } = await supabase
         .from('stock_inventory_items')
-        .select(`
-          *,
-          stock_inventory_reports!inner(report_date, status)
-        `)
+        .select('*, stock_inventory_reports!inner(report_date, status)')
         .eq('item_section', 'sales')
         .eq('stock_inventory_reports.status', 'approved')
-        .gte('stock_inventory_reports.report_date', startDate)
-        .lte('stock_inventory_reports.report_date', endDate)
+        .gte('stock_inventory_reports.report_date', start)
+        .lte('stock_inventory_reports.report_date', end)
 
-      // Get menu items for branch info
-      const { data: menuItems } = await supabase
-        .from('menu_items')
-        .select('*')
+      const { data: menuItems } = await supabase.from('menu_items').select('*')
 
-      // Aggregate by item name
-      const itemStats = new Map<string, {
-        name: string
-        totalQty: number
-        totalRevenue: number
-        branch: string
-      }>()
+      const itemStats = new Map<string, { name: string; totalQty: number; totalRevenue: number; branch: string }>()
 
-      salesItems?.forEach(item => {
+      salesItems?.forEach((item: any) => {
         const key = item.item_name
-        const existing = itemStats.get(key) || {
-          name: item.item_name,
-          totalQty: 0,
-          totalRevenue: 0,
-          branch: ''
-        }
-
+        const existing: { name: string; totalQty: number; totalRevenue: number; branch: string } =
+          itemStats.get(key) || { name: item.item_name, totalQty: 0, totalRevenue: 0, branch: '' }
         existing.totalQty += item.quantity || 0
         existing.totalRevenue += item.total_amount || 0
-
-        // Match with menu_items to get branch
-        const menuItem = menuItems?.find(m => m.name.toLowerCase() === item.item_name.toLowerCase())
-        if (menuItem && !existing.branch) {
-          existing.branch = menuItem.branch
-        }
-
+        const menuItem = menuItems?.find((m: any) => m.name.toLowerCase() === item.item_name.toLowerCase())
+        if (menuItem && !existing.branch) existing.branch = menuItem.branch
         itemStats.set(key, existing)
       })
 
-      // Convert to array and get top 5
       const topSellingItems = Array.from(itemStats.values())
         .sort((a, b) => b.totalQty - a.totalQty)
         .slice(0, 5)
-        .map(item => ({
-          name: item.name,
-          quantity: item.totalQty,
-          revenue: item.totalRevenue,
-          branch: item.branch || 'Multiple'
-        }))
+        .map(item => ({ name: item.name, quantity: item.totalQty, revenue: item.totalRevenue, branch: item.branch || 'Multiple' }))
 
       return { topSellingItems }
-    } catch (error) {
-      console.error('Error loading inventory insights:', error)
+    } catch {
       return { topSellingItems: [] }
     }
   }
 
-  const getDateRange = () => {
-    const today = new Date()
-    switch (dateRange) {
-      case 'today': return { start: today, end: today }
-      case '7d': return { start: subDays(today, 7), end: today }
-      case '30d': return { start: subDays(today, 30), end: today }
-    }
-  }
-
-  const loadAllReports = async (startDate: string, endDate: string) => {
-    const tables = [
-      'stock_inventory_reports',
-      'occupancy_reports',
-      'guest_activity_reports',
-      'revenue_reports',
-      'complaint_reports'
-    ]
-
+  const loadAllReports = async (start: string, end: string): Promise<any[]> => {
+    const tables = ['stock_inventory_reports', 'occupancy_reports', 'guest_activity_reports', 'revenue_reports', 'complaint_reports']
     const results = await Promise.all(
       tables.map(table =>
-        supabase
-          .from(table as any)
-          .select('*')
-          .gte('report_date', startDate)
-          .lte('report_date', endDate)
-          .then(({ data }) => data || [])
+        supabase.from(table as any).select('*').gte('report_date', start).lte('report_date', end)
+          .then(({ data }) => (data || []) as any[])
       )
     )
-
     return results.flat()
   }
 
   const calculateKPIs = (
-    revenues: any[],
-    stockReports: any[],
-    occupancies: any[],
-    reports: any[],
-    managers: any[]
+    revenues: any[], stockReports: any[], occupancies: any[],
+    reports: any[], managers: any[], start: string, end: string
   ) => {
-    // COMBINED REVENUE: Front office + Manager sales
     const frontOfficeRevenue = revenues.reduce((sum, r) => sum + (r.total_revenue || 0), 0)
-    const managerSalesRevenue = stockReports.reduce((sum, r) => {
-      return sum + (r.cash_payments || 0) + (r.card_payments || 0) + (r.transfer_payments || 0)
-    }, 0)
+    const managerSalesRevenue = stockReports.reduce(
+      (sum, r) => sum + (r.cash_payments || 0) + (r.card_payments || 0) + (r.transfer_payments || 0), 0
+    )
     const totalRevenue = frontOfficeRevenue + managerSalesRevenue
 
-    // Previous period revenue for growth calculation
-    const prevPeriodRevenues = revenues.filter(r => {
-      const days = dateRange === 'today' ? 1 : dateRange === '7d' ? 7 : 30
-      const d = new Date(r.report_date)
-      return d < subDays(new Date(), days)
-    })
-    const prevRevenue = prevPeriodRevenues.reduce((sum, r) => sum + (r.total_revenue || 0), 0)
+    // Growth: compare to same-length period immediately before
+    const startMs = new Date(start).getTime()
+    const endMs = new Date(end).getTime()
+    const periodMs = endMs - startMs
+    const prevStart = format(new Date(startMs - periodMs - 86400000), 'yyyy-MM-dd')
+    const prevEnd = format(new Date(startMs - 86400000), 'yyyy-MM-dd')
+    const prevRevenue = revenues
+      .filter(r => r.report_date >= prevStart && r.report_date <= prevEnd)
+      .reduce((sum, r) => sum + (r.total_revenue || 0), 0)
     const revenueGrowth = prevRevenue > 0 ? ((totalRevenue - prevRevenue) / prevRevenue) * 100 : 0
 
-    // Occupancy metrics
     const avgOccupancy = occupancies.length > 0
-      ? occupancies.reduce((sum, o) => sum + (o.occupancy_percentage || 0), 0) / occupancies.length
-      : 0
+      ? occupancies.reduce((sum, o) => sum + (o.occupancy_percentage || 0), 0) / occupancies.length : 0
     const recentOcc = occupancies.slice(-3)
     const earlierOcc = occupancies.slice(0, 3)
     const recentAvg = recentOcc.length > 0 ? recentOcc.reduce((s, o) => s + (o.occupancy_percentage || 0), 0) / recentOcc.length : 0
     const earlierAvg = earlierOcc.length > 0 ? earlierOcc.reduce((s, o) => s + (o.occupancy_percentage || 0), 0) / earlierOcc.length : 0
     const occupancyTrend = earlierAvg > 0 ? ((recentAvg - earlierAvg) / earlierAvg) * 100 : 0
 
-    // Hotel KPIs
     const totalRoomRevenue = revenues.reduce((sum, r) => sum + (r.room_revenue || 0), 0)
     const totalRoomNights = occupancies.reduce((sum, o) => sum + (o.occupied_rooms || 0), 0)
     const adr = totalRoomNights > 0 ? totalRoomRevenue / totalRoomNights : 0
-
     const totalAvailableRooms = occupancies.reduce((sum, o) => sum + (o.total_rooms || 0), 0)
     const revpar = totalAvailableRooms > 0 ? totalRevenue / totalAvailableRooms : 0
 
-    // Manager performance
     const today = format(new Date(), 'yyyy-MM-dd')
     const activeToday = managers.filter(m => reports.some(r => r.manager_id === m.id && r.report_date === today)).length
     const managerCompliance = managers.length > 0 ? (activeToday / managers.length) * 100 : 0
 
-    // Report metrics
     const approvedReports = reports.filter(r => r.status === 'approved' && r.reviewed_at && r.created_at)
     const avgApprovalTime = approvedReports.length > 0
       ? approvedReports.reduce((sum, r) => sum + differenceInHours(new Date(r.reviewed_at), new Date(r.created_at)), 0) / approvedReports.length
       : 0
-
     const rejectionRate = reports.length > 0
-      ? (reports.filter(r => r.status === 'rejected').length / reports.length) * 100
-      : 0
+      ? (reports.filter(r => r.status === 'rejected').length / reports.length) * 100 : 0
 
-    // Top performer
     const managerScores = managers.map(m => {
       const managerReports = reports.filter(r => r.manager_id === m.id)
       const approved = managerReports.filter(r => r.status === 'approved').length
@@ -355,192 +331,43 @@ export default function AnalyticsDashboard() {
     }).sort((a, b) => b.score - a.score)
 
     return {
-      totalRevenue,
-      revenueGrowth,
-      avgOccupancy,
-      occupancyTrend,
-      adr,
-      revpar,
-      managerCompliance,
-      avgApprovalTime,
-      rejectionRate,
+      totalRevenue, revenueGrowth, avgOccupancy, occupancyTrend, adr, revpar,
+      managerCompliance, avgApprovalTime, rejectionRate,
       topPerformerName: managerScores[0]?.name || 'N/A',
       topPerformerScore: managerScores[0]?.score || 0,
     }
   }
 
-  const generateInsights = (
-    kpis: any,
-    revenues: any[],
-    occupancies: any[],
-    inventory: { topSellingItems: TopSellingItem[] }
-  ): Insight[] => {
+  const generateInsights = (kpis: any, revenues: any[], occupancies: any[], inventory: { topSellingItems: TopSellingItem[] }): Insight[] => {
     const insights: Insight[] = []
-
-    // Revenue insight
-    if (kpis.revenueGrowth > 10) {
-      insights.push({
-        id: '1',
-        icon: TrendingUp,
-        title: 'Strong Revenue Growth',
-        description: `Revenue increased by ${kpis.revenueGrowth.toFixed(1)}% compared to the previous period. This indicates healthy business momentum.`,
-        impact: 'positive',
-      })
-    } else if (kpis.revenueGrowth < -5) {
-      insights.push({
-        id: '2',
-        icon: TrendingDown,
-        title: 'Revenue Declining',
-        description: `Revenue decreased by ${Math.abs(kpis.revenueGrowth).toFixed(1)}%. Consider reviewing pricing strategy and promotional activities.`,
-        impact: 'negative',
-      })
-    }
-
-    // Occupancy insight
-    if (kpis.avgOccupancy > 75) {
-      insights.push({
-        id: '3',
-        icon: Hotel,
-        title: 'High Occupancy Rate',
-        description: `Average occupancy at ${kpis.avgOccupancy.toFixed(1)}% suggests strong demand. Consider dynamic pricing to maximize revenue.`,
-        impact: 'positive',
-      })
-    } else if (kpis.avgOccupancy < 50) {
-      insights.push({
-        id: '4',
-        icon: AlertCircle,
-        title: 'Low Occupancy',
-        description: `Occupancy at ${kpis.avgOccupancy.toFixed(1)}% is below optimal. Focus on marketing and promotional campaigns.`,
-        impact: 'negative',
-      })
-    }
-
-    // Manager compliance
-    if (kpis.managerCompliance < 80) {
-      insights.push({
-        id: '5',
-        icon: Users,
-        title: 'Report Submission Gaps',
-        description: `Only ${kpis.managerCompliance.toFixed(0)}% of managers submitted reports today. Follow up with inactive managers.`,
-        impact: 'negative',
-      })
-    }
-
-    // Inventory insight
+    if (kpis.revenueGrowth > 10) insights.push({ id: '1', icon: TrendingUp, title: 'Strong Revenue Growth', description: `Revenue increased by ${kpis.revenueGrowth.toFixed(1)}% compared to the previous period. This indicates healthy business momentum.`, impact: 'positive' })
+    else if (kpis.revenueGrowth < -5) insights.push({ id: '2', icon: TrendingDown, title: 'Revenue Declining', description: `Revenue decreased by ${Math.abs(kpis.revenueGrowth).toFixed(1)}%. Consider reviewing pricing strategy and promotional activities.`, impact: 'negative' })
+    if (kpis.avgOccupancy > 75) insights.push({ id: '3', icon: Hotel, title: 'High Occupancy Rate', description: `Average occupancy at ${kpis.avgOccupancy.toFixed(1)}% suggests strong demand. Consider dynamic pricing to maximize revenue.`, impact: 'positive' })
+    else if (kpis.avgOccupancy < 50) insights.push({ id: '4', icon: AlertCircle, title: 'Low Occupancy', description: `Occupancy at ${kpis.avgOccupancy.toFixed(1)}% is below optimal. Focus on marketing and promotional campaigns.`, impact: 'negative' })
+    if (kpis.managerCompliance < 80) insights.push({ id: '5', icon: Users, title: 'Report Submission Gaps', description: `Only ${kpis.managerCompliance.toFixed(0)}% of managers submitted reports today. Follow up with inactive managers.`, impact: 'negative' })
     if (inventory.topSellingItems.length > 0) {
       const topItem = inventory.topSellingItems[0]
-      insights.push({
-        id: '6',
-        icon: Package,
-        title: 'Top Selling Item Identified',
-        description: `${topItem.name} is your best seller with ${topItem.quantity} units sold. Ensure adequate stock levels.`,
-        impact: 'positive',
-      })
+      insights.push({ id: '6', icon: Package, title: 'Top Selling Item Identified', description: `${topItem.name} is your best seller with ${topItem.quantity} units sold. Ensure adequate stock levels.`, impact: 'positive' })
     }
-
     return insights
   }
 
-  const generateRecommendations = (
-    kpis: any,
-    inventory: { topSellingItems: TopSellingItem[] }
-  ): Recommendation[] => {
+  const generateRecommendations = (kpis: any, inventory: { topSellingItems: TopSellingItem[] }): Recommendation[] => {
     const recs: Recommendation[] = []
-
-    // Revenue recommendations
-    if (kpis.adr < 15000) {
-      recs.push({
-        id: '1',
-        category: 'Revenue',
-        title: 'Increase Average Daily Rate',
-        description: `Your ADR (₦${kpis.adr.toFixed(0)}) is below industry standards. Consider value-added packages, room upgrades, and seasonal pricing.`,
-        priority: 'high',
-        actionLink: '/bdm/analytics/revenue',
-      })
-    }
-
-    if (kpis.rejectionRate > 15) {
-      recs.push({
-        id: '2',
-        category: 'Operations',
-        title: 'Reduce Report Rejection Rate',
-        description: `${kpis.rejectionRate.toFixed(1)}% of reports are rejected. Conduct training sessions on report quality and accuracy.`,
-        priority: 'high',
-        actionLink: '/bdm/analytics/reports',
-      })
-    }
-
-    if (kpis.avgApprovalTime > 24) {
-      recs.push({
-        id: '3',
-        category: 'Efficiency',
-        title: 'Speed Up Report Processing',
-        description: `Average approval time is ${(kpis.avgApprovalTime / 24).toFixed(1)} days. Set SLA targets and streamline review workflows.`,
-        priority: 'medium',
-        actionLink: '/bdm/analytics/reports',
-      })
-    }
-
-    if (kpis.avgOccupancy < 60) {
-      recs.push({
-        id: '4',
-        category: 'Marketing',
-        title: 'Boost Room Occupancy',
-        description: 'Launch targeted campaigns on social media, partner with travel agencies, and offer weekend packages.',
-        priority: 'high',
-      })
-    }
-
-    // Inventory recommendation
-    if (inventory.topSellingItems.length >= 3) {
-      recs.push({
-        id: '5',
-        category: 'Inventory',
-        title: 'Optimize Stock for Top Sellers',
-        description: `Focus procurement on ${inventory.topSellingItems.slice(0, 3).map(i => i.name).join(', ')}. These items drive the most revenue.`,
-        priority: 'medium',
-      })
-    }
-
+    if (kpis.adr < 15000) recs.push({ id: '1', category: 'Revenue', title: 'Increase Average Daily Rate', description: `Your ADR (₦${kpis.adr.toFixed(0)}) is below industry standards. Consider value-added packages, room upgrades, and seasonal pricing.`, priority: 'high', actionLink: '/bdm/analytics/revenue' })
+    if (kpis.rejectionRate > 15) recs.push({ id: '2', category: 'Operations', title: 'Reduce Report Rejection Rate', description: `${kpis.rejectionRate.toFixed(1)}% of reports are rejected. Conduct training sessions on report quality and accuracy.`, priority: 'high', actionLink: '/bdm/analytics/reports' })
+    if (kpis.avgApprovalTime > 24) recs.push({ id: '3', category: 'Efficiency', title: 'Speed Up Report Processing', description: `Average approval time is ${(kpis.avgApprovalTime / 24).toFixed(1)} days. Set SLA targets and streamline review workflows.`, priority: 'medium', actionLink: '/bdm/analytics/reports' })
+    if (kpis.avgOccupancy < 60) recs.push({ id: '4', category: 'Marketing', title: 'Boost Room Occupancy', description: 'Launch targeted campaigns on social media, partner with travel agencies, and offer weekend packages.', priority: 'high' })
+    if (inventory.topSellingItems.length >= 3) recs.push({ id: '5', category: 'Inventory', title: 'Optimize Stock for Top Sellers', description: `Focus procurement on ${inventory.topSellingItems.slice(0, 3).map(i => i.name).join(', ')}. These items drive the most revenue.`, priority: 'medium' })
     return recs
   }
 
   const generateAlerts = (kpis: any, complaints: any[]): Alert[] => {
     const alerts: Alert[] = []
-
     const criticalComplaints = complaints.filter(c => c.severity === 'critical')
-    if (criticalComplaints.length > 0) {
-      alerts.push({
-        id: '1',
-        type: 'critical',
-        title: 'Critical Guest Complaints',
-        message: `${criticalComplaints.length} critical complaint${criticalComplaints.length > 1 ? 's' : ''} logged today requiring immediate attention.`,
-        action: 'View Complaints',
-        actionLink: '/front-office/complaints',
-      })
-    }
-
-    if (kpis.managerCompliance < 70) {
-      alerts.push({
-        id: '2',
-        type: 'warning',
-        title: 'Low Report Submission',
-        message: `${(100 - kpis.managerCompliance).toFixed(0)}% of managers haven't submitted today's reports.`,
-        action: 'View Missing Reports',
-      })
-    }
-
-    if (kpis.rejectionRate > 20) {
-      alerts.push({
-        id: '3',
-        type: 'warning',
-        title: 'High Rejection Rate',
-        message: 'More than 20% of reports are being rejected. Quality issues detected.',
-        action: 'Review Reports',
-        actionLink: '/bdm/rejected',
-      })
-    }
-
+    if (criticalComplaints.length > 0) alerts.push({ id: '1', type: 'critical', title: 'Critical Guest Complaints', message: `${criticalComplaints.length} critical complaint${criticalComplaints.length > 1 ? 's' : ''} logged today requiring immediate attention.`, action: 'View Complaints', actionLink: '/front-office/complaints' })
+    if (kpis.managerCompliance < 70) alerts.push({ id: '2', type: 'warning', title: 'Low Report Submission', message: `${(100 - kpis.managerCompliance).toFixed(0)}% of managers haven't submitted today's reports.`, action: 'View Missing Reports' })
+    if (kpis.rejectionRate > 20) alerts.push({ id: '3', type: 'warning', title: 'High Rejection Rate', message: 'More than 20% of reports are being rejected. Quality issues detected.', action: 'Review Reports', actionLink: '/bdm/rejected' })
     return alerts
   }
 
@@ -551,36 +378,17 @@ export default function AnalyticsDashboard() {
     </div>
   )
 
-  const KPICard = ({
-    title,
-    value,
-    trend,
-    icon: Icon,
-    color,
-    tooltip,
-    link
-  }: {
-    title: string
-    value: string
-    trend?: number
-    icon: any
-    color: string
-    tooltip: string
-    link?: string
+  const KPICard = ({ title, value, trend, icon: Icon, color, tooltip, link }: {
+    title: string; value: string; trend?: number; icon: any; color: string; tooltip: string; link?: string
   }) => {
     const [showTip, setShowTip] = useState(false)
-
     const card = (
       <div className={`card ${link ? 'hover:shadow-lg cursor-pointer transition-all' : ''}`}>
         <div className="flex items-start justify-between mb-3">
           <div className="flex-1">
             <div className="flex items-center space-x-2 mb-2">
               <span className="text-sm font-medium text-gray-600">{title}</span>
-              <div
-                className="relative"
-                onMouseEnter={() => setShowTip(true)}
-                onMouseLeave={() => setShowTip(false)}
-              >
+              <div className="relative" onMouseEnter={() => setShowTip(true)} onMouseLeave={() => setShowTip(false)}>
                 <Info className="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-help" />
                 {showTip && <Tooltip content={tooltip} />}
               </div>
@@ -595,13 +403,11 @@ export default function AnalyticsDashboard() {
           <div className="flex items-center space-x-2">
             {trend > 0 ? (
               <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                <TrendingUp className="w-3 h-3 mr-1" />
-                {trend.toFixed(1)}%
+                <TrendingUp className="w-3 h-3 mr-1" />{trend.toFixed(1)}%
               </span>
             ) : trend < 0 ? (
               <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                <TrendingDown className="w-3 h-3 mr-1" />
-                {Math.abs(trend).toFixed(1)}%
+                <TrendingDown className="w-3 h-3 mr-1" />{Math.abs(trend).toFixed(1)}%
               </span>
             ) : (
               <span className="text-xs text-gray-500">No change</span>
@@ -611,9 +417,13 @@ export default function AnalyticsDashboard() {
         )}
       </div>
     )
-
     return link ? <Link href={link}>{card}</Link> : card
   }
+
+  // Safe date range label
+  const dateRangeLabel = startDate && endDate
+    ? `${format(new Date(startDate), 'MMM dd, yyyy')} – ${format(new Date(endDate), 'MMM dd, yyyy')}`
+    : ''
 
   if (loading) {
     return (
@@ -632,83 +442,76 @@ export default function AnalyticsDashboard() {
     <div className="p-8 max-w-7xl mx-auto">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Analytics Dashboard</h1>
-        <p className="text-gray-600">Intelligent insights to optimize hotel performance</p>
+        <h1 className="text-3xl font-bold text-gray-900 mb-1">Analytics Dashboard</h1>
+        <p className="text-gray-500 text-sm">{dateRangeLabel}</p>
       </div>
 
       {/* Date Range Selector */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center space-x-2">
-          {[
-            { value: 'today' as const, label: 'Today' },
-            { value: '7d' as const, label: 'Last 7 Days' },
-            { value: '30d' as const, label: 'Last 30 Days' },
-          ].map(option => (
+      <div className="card bg-blue-50 border-blue-200 mb-8">
+        <div className="flex items-center space-x-2 mb-3">
+          <Calendar className="w-5 h-5 text-blue-600" />
+          <h3 className="font-semibold text-blue-900">Date Range</h3>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          {([
+            { value: 'today', label: 'Today' },
+            { value: 'yesterday', label: 'Yesterday' },
+            { value: 'this_week', label: 'This Week' },
+            { value: 'last_week', label: 'Last Week' },
+            { value: 'this_month', label: 'This Month' },
+            { value: 'last_month', label: 'Last Month' },
+            { value: 'custom', label: 'Custom Range' },
+          ] as { value: DateRangeOption; label: string }[]).map(option => (
             <button
               key={option.value}
-              onClick={() => setDateRange(option.value)}
-              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                dateRange === option.value
-                  ? 'bg-primary text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              onClick={() => updateDateRange(option.value)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                dateRangeOption === option.value
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-gray-700 hover:bg-blue-100'
               }`}
             >
               {option.label}
             </button>
           ))}
         </div>
+
+        {showCustomDates && (
+          <div className="flex items-center gap-3 p-3 bg-white rounded-lg">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Start Date</label>
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="input-field text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">End Date</label>
+              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="input-field text-sm" />
+            </div>
+            <button onClick={handleCustomDateApply} className="mt-5 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
+              Apply
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Critical Alerts */}
       {data.criticalAlerts.length > 0 && (
         <div className="mb-8 space-y-3">
           {data.criticalAlerts.map(alert => (
-            <div
-              key={alert.id}
-              className={`p-4 rounded-xl border-l-4 ${
-                alert.type === 'critical'
-                  ? 'bg-red-50 border-red-500'
-                  : alert.type === 'warning'
-                  ? 'bg-orange-50 border-orange-500'
-                  : 'bg-blue-50 border-blue-500'
-              }`}
-            >
+            <div key={alert.id} className={`p-4 rounded-xl border-l-4 ${alert.type === 'critical' ? 'bg-red-50 border-red-500' : alert.type === 'warning' ? 'bg-orange-50 border-orange-500' : 'bg-blue-50 border-blue-500'}`}>
               <div className="flex items-start justify-between">
                 <div className="flex items-start space-x-3 flex-1">
-                  <AlertCircle className={`w-5 h-5 mt-0.5 ${
-                    alert.type === 'critical' ? 'text-red-600' : alert.type === 'warning' ? 'text-orange-600' : 'text-blue-600'
-                  }`} />
+                  <AlertCircle className={`w-5 h-5 mt-0.5 ${alert.type === 'critical' ? 'text-red-600' : alert.type === 'warning' ? 'text-orange-600' : 'text-blue-600'}`} />
                   <div>
-                    <div className={`font-semibold mb-1 ${
-                      alert.type === 'critical' ? 'text-red-900' : alert.type === 'warning' ? 'text-orange-900' : 'text-blue-900'
-                    }`}>
-                      {alert.title}
-                    </div>
-                    <div className={`text-sm ${
-                      alert.type === 'critical' ? 'text-red-700' : alert.type === 'warning' ? 'text-orange-700' : 'text-blue-700'
-                    }`}>
-                      {alert.message}
-                    </div>
+                    <div className={`font-semibold mb-1 ${alert.type === 'critical' ? 'text-red-900' : alert.type === 'warning' ? 'text-orange-900' : 'text-blue-900'}`}>{alert.title}</div>
+                    <div className={`text-sm ${alert.type === 'critical' ? 'text-red-700' : alert.type === 'warning' ? 'text-orange-700' : 'text-blue-700'}`}>{alert.message}</div>
                   </div>
                 </div>
                 {alert.actionLink ? (
-                  <Link
-                    href={alert.actionLink}
-                    className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors flex-shrink-0 ${
-                      alert.type === 'critical'
-                        ? 'bg-red-600 text-white hover:bg-red-700'
-                        : alert.type === 'warning'
-                        ? 'bg-orange-600 text-white hover:bg-orange-700'
-                        : 'bg-blue-600 text-white hover:bg-blue-700'
-                    }`}
-                  >
+                  <Link href={alert.actionLink} className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors flex-shrink-0 ${alert.type === 'critical' ? 'bg-red-600 text-white hover:bg-red-700' : alert.type === 'warning' ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
                     {alert.action}
                   </Link>
                 ) : alert.action === 'View Missing Reports' ? (
-                  <button
-                    onClick={loadMissingReports}
-                    className="px-4 py-2 rounded-lg font-medium text-sm bg-orange-600 text-white hover:bg-orange-700 transition-colors flex-shrink-0"
-                  >
+                  <button onClick={loadMissingReports} className="px-4 py-2 rounded-lg font-medium text-sm bg-orange-600 text-white hover:bg-orange-700 transition-colors flex-shrink-0">
                     {alert.action}
                   </button>
                 ) : null}
@@ -720,95 +523,52 @@ export default function AnalyticsDashboard() {
 
       {/* KPI Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-        <KPICard
-          title="Total Revenue"
-          value={`₦${data.totalRevenue.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`}
-          trend={data.revenueGrowth}
-          icon={DollarSign}
-          color="bg-green-500"
-          tooltip="Combined revenue from rooms, food & beverage, laundry, and manager sales"
-          link="/bdm/analytics/revenue"
-        />
-
-        <KPICard
-          title="Occupancy Rate"
-          value={`${data.avgOccupancy.toFixed(1)}%`}
-          trend={data.occupancyTrend}
-          icon={Hotel}
-          color="bg-blue-500"
-          tooltip="Percentage of available rooms that are occupied. Industry standard: 60-70%"
-          link="/bdm/analytics/revenue"
-        />
-
-        <KPICard
-          title="ADR (Avg Daily Rate)"
-          value={`₦${data.adr.toLocaleString('en-NG', { maximumFractionDigits: 0 })}`}
-          icon={Target}
-          color="bg-purple-500"
-          tooltip="Average revenue earned per occupied room. Higher ADR indicates better pricing power"
-          link="/bdm/analytics/revenue"
-        />
-
-        <KPICard
-          title="RevPAR"
-          value={`₦${data.revpar.toLocaleString('en-NG', { maximumFractionDigits: 0 })}`}
-          icon={TrendingUp}
-          color="bg-indigo-500"
-          tooltip="Revenue Per Available Room - combines occupancy and ADR to show overall room revenue performance"
-          link="/bdm/analytics/revenue"
-        />
-
-        <KPICard
-          title="Manager Compliance"
-          value={`${data.managerCompliance.toFixed(0)}%`}
-          icon={Users}
-          color="bg-cyan-500"
-          tooltip="Percentage of managers who submitted all required reports on time"
-          link="/bdm/analytics/managers"
-        />
-
-        <KPICard
-          title="Report Quality"
-          value={`${(100 - data.rejectionRate).toFixed(0)}%`}
-          icon={CheckCircle}
-          color="bg-emerald-500"
-          tooltip="Percentage of reports approved without rejection. Target: >90%"
-          link="/bdm/analytics/reports"
-        />
+        <KPICard title="Total Revenue" value={`₦${data.totalRevenue.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`} trend={data.revenueGrowth} icon={DollarSign} color="bg-green-500" tooltip="Combined revenue from rooms, food & beverage, laundry, and manager sales" link="/bdm/analytics/revenue" />
+        <KPICard title="Occupancy Rate" value={`${data.avgOccupancy.toFixed(1)}%`} trend={data.occupancyTrend} icon={Hotel} color="bg-blue-500" tooltip="Percentage of available rooms that are occupied. Industry standard: 60-70%" link="/bdm/analytics/revenue" />
+        <KPICard title="ADR (Avg Daily Rate)" value={`₦${data.adr.toLocaleString('en-NG', { maximumFractionDigits: 0 })}`} icon={Target} color="bg-purple-500" tooltip="Average revenue earned per occupied room. Higher ADR indicates better pricing power" link="/bdm/analytics/revenue" />
+        <KPICard title="RevPAR" value={`₦${data.revpar.toLocaleString('en-NG', { maximumFractionDigits: 0 })}`} icon={TrendingUp} color="bg-indigo-500" tooltip="Revenue Per Available Room - combines occupancy and ADR to show overall room revenue performance" link="/bdm/analytics/revenue" />
+        <KPICard title="Manager Compliance" value={`${data.managerCompliance.toFixed(0)}%`} icon={Users} color="bg-cyan-500" tooltip="Percentage of managers who submitted all required reports on time" link="/bdm/analytics/managers" />
+        <KPICard title="Report Quality" value={`${(100 - data.rejectionRate).toFixed(0)}%`} icon={CheckCircle} color="bg-emerald-500" tooltip="Percentage of reports approved without rejection. Target: >90%" link="/bdm/analytics/reports" />
       </div>
 
       {/* Top Selling Items */}
       {data.topSellingItems.length > 0 && (
         <div className="mb-8 card">
-          <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center">
-            <Package className="w-5 h-5 mr-2 text-purple-600" />
-            Top Selling Items
-          </h2>
-          <div className="space-y-3">
-            {data.topSellingItems.map((item, index) => (
-              <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-center space-x-3">
-                  <span className="text-lg font-bold text-gray-400">#{index + 1}</span>
-                  <div>
-                    <div className="font-semibold text-gray-900">{item.name}</div>
-                    <div className="text-xs text-gray-500">{item.branch}</div>
+          <button onClick={() => setTopItemsExpanded(!topItemsExpanded)} className="w-full flex items-center justify-between mb-4 hover:bg-gray-50 -m-4 p-4 rounded-lg transition-colors">
+            <h2 className="text-xl font-bold text-gray-900 flex items-center">
+              <Package className="w-5 h-5 mr-2 text-purple-600" />
+              Top Selling Items
+              <span className="ml-3 text-sm font-normal text-gray-500">({data.topSellingItems.length} items)</span>
+            </h2>
+            {topItemsExpanded ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
+          </button>
+          {topItemsExpanded ? (
+            <>
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {data.topSellingItems.map((item, index) => (
+                  <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                    <div className="flex items-center space-x-3">
+                      <span className="text-lg font-bold text-gray-400">#{index + 1}</span>
+                      <div>
+                        <div className="font-semibold text-gray-900">{item.name}</div>
+                        <div className="text-xs text-gray-500">{item.branch}</div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-bold text-gray-900">{item.quantity} sold</div>
+                      <div className="text-xs text-green-600">₦{item.revenue.toLocaleString('en-NG', { maximumFractionDigits: 0 })}</div>
+                    </div>
                   </div>
-                </div>
-                <div className="text-right">
-                  <div className="font-bold text-gray-900">{item.quantity} sold</div>
-                  <div className="text-xs text-green-600">₦{item.revenue.toLocaleString('en-NG')}</div>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
-
-          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-            <div className="text-xs font-semibold text-blue-900 mb-1">💡 Inventory Strategy:</div>
-            <div className="text-xs text-blue-700">
-              Focus procurement on top 3 items. Consider bulk discounts for high-volume items.
-              Stock levels should prioritize fast-moving inventory.
-            </div>
-          </div>
+              <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                <div className="text-xs font-semibold text-blue-900 mb-1">💡 Inventory Strategy:</div>
+                <div className="text-xs text-blue-700">Focus procurement on top 3 items. Consider bulk discounts for high-volume items. Stock levels should prioritize fast-moving inventory.</div>
+              </div>
+            </>
+          ) : (
+            <div className="pt-2 text-sm text-gray-500 text-center">Click to view all {data.topSellingItems.length} items</div>
+          )}
         </div>
       )}
 
@@ -823,33 +583,14 @@ export default function AnalyticsDashboard() {
             {data.smartInsights.map(insight => {
               const Icon = insight.icon
               return (
-                <div
-                  key={insight.id}
-                  className={`p-4 rounded-xl border-2 ${
-                    insight.impact === 'positive'
-                      ? 'bg-green-50 border-green-200'
-                      : insight.impact === 'negative'
-                      ? 'bg-orange-50 border-orange-200'
-                      : 'bg-blue-50 border-blue-200'
-                  }`}
-                >
+                <div key={insight.id} className={`p-4 rounded-xl border-2 ${insight.impact === 'positive' ? 'bg-green-50 border-green-200' : insight.impact === 'negative' ? 'bg-orange-50 border-orange-200' : 'bg-blue-50 border-blue-200'}`}>
                   <div className="flex items-start space-x-3">
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                      insight.impact === 'positive' ? 'bg-green-500' : insight.impact === 'negative' ? 'bg-orange-500' : 'bg-blue-500'
-                    }`}>
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${insight.impact === 'positive' ? 'bg-green-500' : insight.impact === 'negative' ? 'bg-orange-500' : 'bg-blue-500'}`}>
                       <Icon className="w-5 h-5 text-white" />
                     </div>
                     <div className="flex-1">
-                      <div className={`font-semibold mb-1 ${
-                        insight.impact === 'positive' ? 'text-green-900' : insight.impact === 'negative' ? 'text-orange-900' : 'text-blue-900'
-                      }`}>
-                        {insight.title}
-                      </div>
-                      <div className={`text-sm ${
-                        insight.impact === 'positive' ? 'text-green-700' : insight.impact === 'negative' ? 'text-orange-700' : 'text-blue-700'
-                      }`}>
-                        {insight.description}
-                      </div>
+                      <div className={`font-semibold mb-1 ${insight.impact === 'positive' ? 'text-green-900' : insight.impact === 'negative' ? 'text-orange-900' : 'text-blue-900'}`}>{insight.title}</div>
+                      <div className={`text-sm ${insight.impact === 'positive' ? 'text-green-700' : insight.impact === 'negative' ? 'text-orange-700' : 'text-blue-700'}`}>{insight.description}</div>
                     </div>
                   </div>
                 </div>
@@ -868,41 +609,17 @@ export default function AnalyticsDashboard() {
           </div>
           <div className="space-y-3">
             {data.recommendations.map(rec => (
-              <div
-                key={rec.id}
-                className={`p-4 rounded-xl border-l-4 ${
-                  rec.priority === 'high'
-                    ? 'bg-red-50 border-red-500'
-                    : rec.priority === 'medium'
-                    ? 'bg-yellow-50 border-yellow-500'
-                    : 'bg-blue-50 border-blue-500'
-                }`}
-              >
+              <div key={rec.id} className={`p-4 rounded-xl border-l-4 ${rec.priority === 'high' ? 'bg-red-50 border-red-500' : rec.priority === 'medium' ? 'bg-yellow-50 border-yellow-500' : 'bg-blue-50 border-blue-500'}`}>
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center space-x-2 mb-1">
-                      <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
-                        rec.priority === 'high' ? 'bg-red-100 text-red-700' : rec.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'
-                      }`}>
-                        {rec.category}
-                      </span>
-                      <span className={`font-semibold ${
-                        rec.priority === 'high' ? 'text-red-900' : rec.priority === 'medium' ? 'text-yellow-900' : 'text-blue-900'
-                      }`}>
-                        {rec.title}
-                      </span>
+                      <span className={`px-2 py-0.5 rounded text-xs font-semibold ${rec.priority === 'high' ? 'bg-red-100 text-red-700' : rec.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-700'}`}>{rec.category}</span>
+                      <span className={`font-semibold ${rec.priority === 'high' ? 'text-red-900' : rec.priority === 'medium' ? 'text-yellow-900' : 'text-blue-900'}`}>{rec.title}</span>
                     </div>
-                    <div className={`text-sm ${
-                      rec.priority === 'high' ? 'text-red-700' : rec.priority === 'medium' ? 'text-yellow-700' : 'text-blue-700'
-                    }`}>
-                      {rec.description}
-                    </div>
+                    <div className={`text-sm ${rec.priority === 'high' ? 'text-red-700' : rec.priority === 'medium' ? 'text-yellow-700' : 'text-blue-700'}`}>{rec.description}</div>
                   </div>
                   {rec.actionLink && (
-                    <Link
-                      href={rec.actionLink}
-                      className="ml-4 px-4 py-2 bg-gray-900 text-white rounded-lg font-medium text-sm hover:bg-gray-800 transition-colors flex items-center space-x-1 flex-shrink-0"
-                    >
+                    <Link href={rec.actionLink} className="ml-4 px-4 py-2 bg-gray-900 text-white rounded-lg font-medium text-sm hover:bg-gray-800 transition-colors flex items-center space-x-1 flex-shrink-0">
                       <span>View Details</span>
                       <ArrowRight className="w-4 h-4" />
                     </Link>
@@ -918,9 +635,7 @@ export default function AnalyticsDashboard() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Link href="/bdm/analytics/revenue" className="card hover:shadow-lg transition-all">
           <div className="flex items-center space-x-4">
-            <div className="w-12 h-12 bg-green-500 rounded-xl flex items-center justify-center">
-              <DollarSign className="w-6 h-6 text-white" />
-            </div>
+            <div className="w-12 h-12 bg-green-500 rounded-xl flex items-center justify-center"><DollarSign className="w-6 h-6 text-white" /></div>
             <div className="flex-1">
               <div className="font-semibold text-gray-900">Revenue Analytics</div>
               <div className="text-sm text-gray-600">Trends, charts & forecasts</div>
@@ -928,12 +643,9 @@ export default function AnalyticsDashboard() {
             <ArrowRight className="w-5 h-5 text-gray-400" />
           </div>
         </Link>
-
         <Link href="/bdm/analytics/managers" className="card hover:shadow-lg transition-all">
           <div className="flex items-center space-x-4">
-            <div className="w-12 h-12 bg-blue-500 rounded-xl flex items-center justify-center">
-              <Award className="w-6 h-6 text-white" />
-            </div>
+            <div className="w-12 h-12 bg-blue-500 rounded-xl flex items-center justify-center"><Award className="w-6 h-6 text-white" /></div>
             <div className="flex-1">
               <div className="font-semibold text-gray-900">Manager Performance</div>
               <div className="text-sm text-gray-600">Leaderboard & coaching</div>
@@ -941,12 +653,9 @@ export default function AnalyticsDashboard() {
             <ArrowRight className="w-5 h-5 text-gray-400" />
           </div>
         </Link>
-
         <Link href="/bdm/analytics/reports" className="card hover:shadow-lg transition-all">
           <div className="flex items-center space-x-4">
-            <div className="w-12 h-12 bg-purple-500 rounded-xl flex items-center justify-center">
-              <Clock className="w-6 h-6 text-white" />
-            </div>
+            <div className="w-12 h-12 bg-purple-500 rounded-xl flex items-center justify-center"><Clock className="w-6 h-6 text-white" /></div>
             <div className="flex-1">
               <div className="font-semibold text-gray-900">Report Intelligence</div>
               <div className="text-sm text-gray-600">Quality & processing times</div>
@@ -963,18 +672,12 @@ export default function AnalyticsDashboard() {
             <div className="p-6 border-b">
               <div className="flex items-center justify-between">
                 <h2 className="text-2xl font-bold text-gray-900">Missing Reports</h2>
-                <button
-                  onClick={() => setShowMissingReportsModal(false)}
-                  className="text-gray-400 hover:text-gray-600"
-                >
+                <button onClick={() => setShowMissingReportsModal(false)} className="text-gray-400 hover:text-gray-600">
                   <X className="w-6 h-6" />
                 </button>
               </div>
-              <p className="text-sm text-gray-600 mt-1">
-                Managers who haven't submitted reports for specific dates
-              </p>
+              <p className="text-sm text-gray-600 mt-1">Managers who haven't submitted reports for specific dates</p>
             </div>
-
             <div className="p-6 overflow-y-auto max-h-[70vh]">
               {missingReports.length === 0 ? (
                 <div className="text-center py-8">
@@ -993,9 +696,7 @@ export default function AnalyticsDashboard() {
                             {manager.branch && ` • ${manager.branch}`}
                           </div>
                         </div>
-                        <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm font-medium">
-                          {manager.total_missing} missing
-                        </span>
+                        <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-sm font-medium">{manager.total_missing} missing</span>
                       </div>
                       <div className="mt-3">
                         <div className="text-xs font-medium text-gray-700 mb-1">Missing dates:</div>
@@ -1008,10 +709,7 @@ export default function AnalyticsDashboard() {
                         </div>
                       </div>
                       <div className="mt-3 pt-3 border-t border-orange-200">
-                        <a
-                          href={`mailto:${manager.manager_email}?subject=Missing Reports Reminder&body=Hi ${manager.manager_name},%0D%0A%0D%0AYou have ${manager.total_missing} missing report(s). Please submit them as soon as possible.`}
-                          className="inline-flex items-center text-sm text-orange-700 hover:text-orange-900 font-medium"
-                        >
+                        <a href={`mailto:${manager.manager_email}?subject=Missing Reports Reminder&body=Hi ${manager.manager_name},%0D%0A%0D%0AYou have ${manager.total_missing} missing report(s). Please submit them as soon as possible.`} className="inline-flex items-center text-sm text-orange-700 hover:text-orange-900 font-medium">
                           <Mail className="w-4 h-4 mr-2" />
                           Send Reminder Email
                         </a>

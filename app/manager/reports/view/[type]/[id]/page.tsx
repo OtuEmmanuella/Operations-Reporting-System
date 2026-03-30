@@ -241,7 +241,7 @@ export default function ViewReportPage() {
           )}
           {needsManagerResponse && (
             <div className="mt-4 pt-4 border-t border-orange-200">
-              <label className="block text-sm font-bold text-orange-900 mb-2">\u270d\ufe0f Your Response to the BDM</label>
+              <label className="block text-sm font-bold text-orange-900 mb-2">Your Response to the BDM</label>
               <textarea
                 value={clarificationResponse}
                 onChange={(e) => setClarificationResponse(e.target.value)}

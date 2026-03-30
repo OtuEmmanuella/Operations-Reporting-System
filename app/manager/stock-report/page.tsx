@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useMenuItems } from '@/lib/hooks/useMenuItems'
-import { ArrowLeft, Package, Plus, Trash2, DollarSign, ChevronDown, Loader2 } from 'lucide-react'
+import { ArrowLeft, Package, Plus, Trash2, DollarSign, ChevronDown, Loader2, Search } from 'lucide-react'
 import Link from 'next/link'
 
 const BANKS = ['Moniepoint', 'GTBank', 'Fairmoney', 'Zenith Bank', 'Access Bank', 'First Bank', 'UBA', 'Opay', 'Palmpay', 'Other']
@@ -45,6 +45,7 @@ export default function UnifiedStockReportPage() {
   const [cardPayments, setCardPayments] = useState<BankPayment[]>([{ ...BLANK_PAYMENT }])
   const [transferPayments, setTransferPayments] = useState<BankPayment[]>([{ ...BLANK_PAYMENT }])
   const [notes, setNotes] = useState('')
+  const [menuSearch, setMenuSearch] = useState('')
 
   // Calculations (NO totals for different stock items - only sales revenue and payments)
   const totalSalesRevenue = salesItems.reduce((sum, i) => sum + i.quantity * i.unit_price, 0)
@@ -77,6 +78,13 @@ export default function UnifiedStockReportPage() {
     setter(prev => prev.filter((_, idx) => idx !== i))
   const updatePaymentRow = (setter: React.Dispatch<React.SetStateAction<BankPayment[]>>, i: number, field: 'bank' | 'amount', value: any) =>
     setter(prev => prev.map((item, idx) => idx === i ? { ...item, [field]: value } : item))
+
+
+  const filteredMenuItems = menuItems.filter(item => 
+  item.name.toLowerCase().includes(menuSearch.toLowerCase()) ||
+  (item.category && item.category.toLowerCase().includes(menuSearch.toLowerCase()))
+)
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -334,23 +342,42 @@ const salesDbItems = salesItems
         {/* SECTION 2: SALES */}
         {/* ═══════════════════════════════════════════════════════════════ */}
         <div className="card bg-orange-50 border-orange-200">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-lg font-bold text-orange-900 flex items-center">
-                <DollarSign className="w-6 h-6 mr-2" />
-                SECTION 2: Sales (What You Sold Today)
-              </h2>
-              <p className="text-sm text-orange-700">Select items from your branch menu — prices auto-fill, just enter quantities</p>
+  <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-lg font-bold text-orange-900 flex items-center">
+            <DollarSign className="w-6 h-6 mr-2" />
+            SECTION 2: Sales (What You Sold Today)
+          </h2>
+          <p className="text-sm text-orange-700">Select items from your branch menu — prices auto-fill, just enter quantities</p>
+        </div>
+        <button
+          type="button"
+          onClick={addSalesItem}
+          className="flex items-center px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
+        >
+          <Plus className="w-4 h-4 mr-2" />
+          Add Sale
+        </button>
+      </div>
+         
+          <div className="mb-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search menu items by name or category..."
+                  value={menuSearch}
+                  onChange={(e) => setMenuSearch(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-400 focus:border-transparent bg-white"
+                />
+              </div>
+              {menuSearch && (
+                <p className="text-sm text-orange-700 mt-2">
+                  Found {filteredMenuItems.length} item{filteredMenuItems.length !== 1 ? 's' : ''}
+                </p>
+              )}
             </div>
-            <button
-              type="button"
-              onClick={addSalesItem}
-              className="flex items-center px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add Sale
-            </button>
-          </div>
+
 
           {menuLoading && (
             <div className="p-4 bg-white rounded-lg text-sm text-gray-500 flex items-center space-x-2">
@@ -383,18 +410,19 @@ const salesDbItems = salesItems
                     <div className="col-span-2">
                       <label className="block text-xs font-medium text-gray-700 mb-1">Menu Item</label>
                       <div className="relative">
+                        
                         <select
-                          value={item.menu_item_id}
-                          onChange={(e) => handleMenuSelect(i, e.target.value)}
-                          className="input-field appearance-none pr-8 text-sm"
-                        >
-                          <option value="">— Select item from menu —</option>
-                          {menuItems.map(m => (
-                            <option key={m.id} value={m.id}>
-                              {m.name}{m.category ? ` (${m.category})` : ''} - ₦{m.unit_price.toLocaleString()}
-                            </option>
-                          ))}
-                        </select>
+                      value={item.menu_item_id}
+                      onChange={(e) => handleMenuSelect(i, e.target.value)}
+                      className="input-field appearance-none pr-8 text-sm"
+                    >
+                      <option value="">— Select item from menu —</option>
+                      {filteredMenuItems.map(m => (  // ✅ USE filteredMenuItems
+                        <option key={m.id} value={m.id}>
+                          {m.name}{m.category ? ` (${m.category})` : ''} - ₦{m.unit_price.toLocaleString()}
+                        </option>
+                      ))}
+                    </select>
                         <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
                       </div>
                     </div>
