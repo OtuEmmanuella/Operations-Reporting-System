@@ -4,25 +4,23 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
-  Home, Package, DollarSign, FileText, BarChart3, LogOut, Users, Bell,
+  Home, Package, FileText, BarChart3, LogOut, Users, Bell,
   CheckCircle, XCircle, ChevronDown, ChevronRight, Clock, Hotel, AlertTriangle,
-  TrendingUp, MessageSquare, Menu, X, ChevronLeft, Settings, UserCheck
+  TrendingUp, MessageSquare, ChevronLeft
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import clsx from 'clsx'
 
 interface UserProfile {
+  id: string
   full_name: string
   role: 'manager' | 'bdm' | 'front_office_manager'
   position?: string | null
   department?: string | null
 }
 
-interface NavSection {
-  label: string
-  icon: React.ElementType
-  items: { href: string; label: string; icon: React.ElementType }[]
-}
+interface NavItem { href: string; label: string; icon: React.ElementType }
+interface NavSection { label: string; icon: React.ElementType; items: NavItem[] }
 
 export default function Sidebar() {
   const pathname = usePathname()
@@ -32,18 +30,20 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
   const [openSections, setOpenSections] = useState<Set<string>>(new Set())
 
-  useEffect(() => {
-    loadUserProfile()
-  }, [])
+  useEffect(() => { loadUserProfile() }, [])
 
   useEffect(() => {
     if (!userProfile) return
     const sections = getSections(userProfile.role)
+    const toOpen: string[] = []
     sections.forEach(sec => {
-      if (sec.items.some(item => pathname.startsWith(item.href))) {
-        setOpenSections(prev => new Set([...prev, sec.label]))
+      if (sec.items.some(item => pathname.startsWith(item.href.split('?')[0]))) {
+        toOpen.push(sec.label)
       }
     })
+    if (toOpen.length > 0) {
+      setOpenSections(prev => new Set([...Array.from(prev), ...toOpen]))
+    }
   }, [pathname, userProfile])
 
   const loadUserProfile = async () => {
@@ -51,9 +51,9 @@ export default function Sidebar() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/'); return }
 
-      const { data: profile, error } = await supabase
+      const { data, error } = await supabase
         .from('users')
-        .select('full_name, role, position, department')
+        .select('id, full_name, role, position, department')
         .eq('id', user.id)
         .single()
 
@@ -62,10 +62,20 @@ export default function Sidebar() {
           user.email?.includes('bdm') ? 'bdm' :
           user.email?.includes('frontoffice') || user.email?.includes('front') ? 'front_office_manager' : 'manager'
         const fullName = user.email?.split('@')[0] || 'User'
-        await supabase.from('users').insert({ id: user.id, email: user.email!, full_name: fullName, role })
-        setUserProfile({ full_name: fullName, role, position: null, department: null })
-      } else if (profile) {
-        setUserProfile(profile)
+        
+        // Fix: Use 'as any' to bypass Supabase's strict typing
+        await supabase.from('users').insert({
+          id: user.id, 
+          email: user.email!, 
+          full_name: fullName, 
+          role,
+          position: null,
+          department: null
+        } as any)
+        
+        setUserProfile({ id: user.id, full_name: fullName, role, position: null, department: null })
+      } else if (data) {
+        setUserProfile(data as UserProfile)
       }
     } catch (error) {
       console.error('Error:', error)
@@ -81,7 +91,7 @@ export default function Sidebar() {
 
   const toggleSection = (label: string) => {
     setOpenSections(prev => {
-      const next = new Set(prev)
+      const next = new Set(Array.from(prev))
       next.has(label) ? next.delete(label) : next.add(label)
       return next
     })
@@ -95,10 +105,11 @@ export default function Sidebar() {
       },
       {
         label: 'Submit Reports', icon: FileText,
-        items: [
-          { href: '/manager/stock-report', label: 'Stock & Sales', icon: Package },
-          
-        ],
+        items: [{ href: '/manager/stock-report', label: 'Stock & Sales', icon: Package }],
+      },
+      {
+        label: 'My Performance', icon: TrendingUp,
+        items: [{ href: '/manager/my-sales-report', label: 'My Sales Report', icon: BarChart3 }],
       },
       {
         label: 'My Reports', icon: Bell,
@@ -117,8 +128,8 @@ export default function Sidebar() {
           { href: '/bdm/dashboard', label: 'Dashboard', icon: Home },
           { href: '/bdm/managers', label: 'Managers', icon: Users },
           { href: '/bdm/analytics', label: 'Analytics', icon: BarChart3 },
-          { href: '/bdm/analytics/branch-performance', label: 'Branch Performance', icon: TrendingUp }, 
-          { href: '/bdm/analytics/multi-branch-sales-overview', label: 'Multi-Branch Sales Overview', icon: Package }
+          { href: '/bdm/analytics/branch-performance', label: 'Branch Performance', icon: TrendingUp },
+          { href: '/bdm/analytics/multi-branch-sales-overview', label: 'Multi-Branch Sales Overview', icon: Package },
         ],
       },
       {
@@ -147,6 +158,10 @@ export default function Sidebar() {
         ],
       },
       {
+        label: 'My Performance', icon: BarChart3,
+        items: [{ href: '/front-office/my-revenue-report', label: 'My Revenue Report', icon: TrendingUp }],
+      },
+      {
         label: 'My Reports', icon: Bell,
         items: [
           { href: '/front-office/reports/pending', label: 'Pending', icon: Clock },
@@ -167,20 +182,14 @@ export default function Sidebar() {
   const getInitials = (name: string) =>
     name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
 
-  // FIX: Use actual position if available, otherwise use role-based label
   const getDisplayRole = () => {
-    // If position is set, use it
-    if (userProfile?.position?.trim()) {
-      return userProfile.position
-    }
-    
-    // Otherwise fallback to role-based labels
-    const roleLabels: Record<string, string> = {
+    if (userProfile?.position?.trim()) return userProfile.position
+    const labels: Record<string, string> = {
       manager: 'Manager',
       bdm: 'Business Dev. Manager',
       front_office_manager: 'Front Office Manager'
     }
-    return roleLabels[userProfile?.role || ''] || 'User'
+    return labels[userProfile?.role || ''] || 'User'
   }
 
   const getRoleColor = (role: string) => ({
@@ -205,7 +214,8 @@ export default function Sidebar() {
       collapsed ? 'w-16' : 'w-64'
     )}>
       {/* Header */}
-      <div className={clsx('flex items-center border-b border-gray-200 h-16 flex-shrink-0', collapsed ? 'justify-center px-3' : 'justify-between px-5')}>
+      <div className={clsx('flex items-center border-b border-gray-200 h-16 flex-shrink-0',
+        collapsed ? 'justify-center px-3' : 'justify-between px-5')}>
         {!collapsed && (
           <div className="flex items-center space-x-2">
             <div className="w-7 h-7 bg-primary rounded-lg flex items-center justify-center">
@@ -214,7 +224,8 @@ export default function Sidebar() {
             <span className="font-bold text-gray-900 text-sm">ReportHub</span>
           </div>
         )}
-        <button onClick={() => setCollapsed(!collapsed)} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors">
+        <button onClick={() => setCollapsed(!collapsed)}
+          className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors">
           {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
         </button>
       </div>
@@ -249,14 +260,18 @@ export default function Sidebar() {
         {sections.map(section => {
           const isOpen = openSections.has(section.label)
           const SectionIcon = section.icon
-          const hasActiveItem = section.items.some(item => pathname === item.href || pathname.startsWith(item.href + '/'))
+          const hasActiveItem = section.items.some(item => {
+            const hrefPath = item.href.split('?')[0]
+            return pathname === hrefPath || pathname.startsWith(hrefPath + '/')
+          })
 
           if (collapsed) {
             return (
               <div key={section.label} className="space-y-0.5">
                 {section.items.map(item => {
                   const Icon = item.icon
-                  const isActive = pathname === item.href
+                  const hrefPath = item.href.split('?')[0]
+                  const isActive = pathname === hrefPath || pathname.startsWith(hrefPath + '/')
                   return (
                     <Link key={item.href} href={item.href} title={item.label}
                       className={clsx('flex items-center justify-center w-10 h-10 mx-auto rounded-lg transition-colors',
@@ -287,7 +302,8 @@ export default function Sidebar() {
                 <div className="mt-0.5 ml-2 space-y-0.5">
                   {section.items.map(item => {
                     const Icon = item.icon
-                    const isActive = pathname === item.href
+                    const hrefPath = item.href.split('?')[0]
+                    const isActive = pathname === hrefPath || pathname.startsWith(hrefPath + '/')
                     return (
                       <Link key={item.href} href={item.href}
                         className={clsx(
@@ -307,7 +323,7 @@ export default function Sidebar() {
       </nav>
 
       {/* Logout */}
-      <div className={clsx('border-t border-gray-100 p-2 flex-shrink-0')}>
+      <div className="border-t border-gray-100 p-2 flex-shrink-0">
         <button onClick={handleLogout}
           className={clsx(
             'flex items-center rounded-lg text-gray-500 hover:bg-red-50 hover:text-red-600 transition-colors',

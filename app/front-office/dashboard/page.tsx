@@ -6,11 +6,18 @@ import { Hotel, Users, DollarSign, AlertTriangle, TrendingUp, Clock, CheckCircle
 import Link from 'next/link'
 
 interface DashboardStats {
-  occupancy_percentage: number; total_rooms: number; occupied_rooms: number
-  vacant_rooms: number; maintenance_rooms: number; today_check_ins: number
-  today_check_outs: number; today_revenue: number
-  pending_complaints: number; in_progress_complaints: number
-  pending_reports: number; clarification_reports: number
+  occupancy_percentage: number
+  total_rooms: number
+  occupied_rooms: number
+  vacant_rooms: number
+  maintenance_rooms: number
+  today_check_ins: number
+  today_check_outs: number
+  today_revenue: number
+  pending_complaints: number
+  in_progress_complaints: number
+  pending_reports: number
+  clarification_reports: number
 }
 
 export default function FrontOfficeDashboard() {
@@ -38,21 +45,32 @@ export default function FrontOfficeDashboard() {
         supabase.from('complaint_reports').select('status').eq('manager_id', user.id).in('status', ['pending', 'clarification_requested']),
       ])
 
-      setUserName(ud.data?.full_name?.split(' ')[0] || '')
-      const allPending = [...(pOcc.data||[]),...(pGuest.data||[]),...(pRev.data||[]),...(pComp.data||[])]
-      const complaintList = comp.data || []
+      // Cast all results to avoid Supabase strict type inference issues
+      const occData = occ.data as Record<string, unknown> | null
+      const guestData = guest.data as Record<string, unknown> | null
+      const revData = rev.data as Record<string, unknown> | null
+      const compData = (comp.data || []) as Record<string, unknown>[]
+      const userData = ud.data as Record<string, unknown> | null
+      const pOccData = (pOcc.data || []) as Record<string, unknown>[]
+      const pGuestData = (pGuest.data || []) as Record<string, unknown>[]
+      const pRevData = (pRev.data || []) as Record<string, unknown>[]
+      const pCompData = (pComp.data || []) as Record<string, unknown>[]
+
+      setUserName((userData?.full_name as string)?.split(' ')[0] || '')
+
+      const allPending = [...pOccData, ...pGuestData, ...pRevData, ...pCompData]
 
       setStats({
-        occupancy_percentage: occ.data?.occupancy_percentage || 0,
-        total_rooms: occ.data?.total_rooms || 0,
-        occupied_rooms: occ.data?.occupied_rooms || 0,
-        vacant_rooms: occ.data?.vacant_rooms || 0,
-        maintenance_rooms: occ.data?.maintenance_rooms || 0,
-        today_check_ins: guest.data?.check_ins || 0,
-        today_check_outs: guest.data?.check_outs || 0,
-        today_revenue: rev.data?.total_revenue || 0,
-        pending_complaints: complaintList.filter(c => c.resolution_status === 'pending').length,
-        in_progress_complaints: complaintList.filter(c => c.resolution_status === 'in_progress').length,
+        occupancy_percentage: (occData?.occupancy_percentage as number) || 0,
+        total_rooms: (occData?.total_rooms as number) || 0,
+        occupied_rooms: (occData?.occupied_rooms as number) || 0,
+        vacant_rooms: (occData?.vacant_rooms as number) || 0,
+        maintenance_rooms: (occData?.maintenance_rooms as number) || 0,
+        today_check_ins: (guestData?.check_ins as number) || 0,
+        today_check_outs: (guestData?.check_outs as number) || 0,
+        today_revenue: (revData?.total_revenue as number) || 0,
+        pending_complaints: compData.filter(c => c.resolution_status === 'pending').length,
+        in_progress_complaints: compData.filter(c => c.resolution_status === 'in_progress').length,
         pending_reports: allPending.filter(r => r.status === 'pending').length,
         clarification_reports: allPending.filter(r => r.status === 'clarification_requested').length,
       })
@@ -82,7 +100,7 @@ export default function FrontOfficeDashboard() {
         <p className="text-gray-500 mt-1">Here's today's overview — {new Date().toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
       </div>
 
-      {/* Alert banners */}
+      {/* Alert banner */}
       {(stats?.clarification_reports || 0) > 0 && (
         <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-xl flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -91,26 +109,26 @@ export default function FrontOfficeDashboard() {
             </div>
             <div>
               <p className="font-semibold text-orange-900 text-sm">Response Required</p>
-              <p className="text-orange-700 text-xs">BDM has requested clarification on {stats?.clarification_reports} report{(stats?.clarification_reports||0)>1?'s':''}</p>
+              <p className="text-orange-700 text-xs">BDM has requested clarification on {stats?.clarification_reports} report{(stats?.clarification_reports || 0) > 1 ? 's' : ''}</p>
             </div>
           </div>
           <Link href="/front-office/reports/pending" className="px-3 py-1.5 bg-orange-600 text-white text-xs font-medium rounded-lg hover:bg-orange-700">Respond Now →</Link>
         </div>
       )}
 
-      {/* Metric cards row */}
+      {/* Metric cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {[
-          { label: 'Occupancy Rate', value: `${stats?.occupancy_percentage.toFixed(1)}%`, sub: `${stats?.occupied_rooms}/${stats?.total_rooms} rooms`, icon: Hotel, color: 'bg-blue-500', bg: 'bg-blue-50', text: 'text-blue-600' },
-          { label: "Today's Check-ins", value: stats?.today_check_ins, sub: `Check-outs: ${stats?.today_check_outs}`, icon: Users, color: 'bg-green-500', bg: 'bg-green-50', text: 'text-green-600' },
-          { label: "Today's Revenue", value: `₦${(stats?.today_revenue || 0).toLocaleString()}`, sub: 'Daily total', icon: DollarSign, color: 'bg-purple-500', bg: 'bg-purple-50', text: 'text-purple-600' },
-          { label: 'Active Complaints', value: totalActiveComplaints, sub: totalActiveComplaints === 0 ? 'All clear!' : `${stats?.in_progress_complaints} in progress`, icon: AlertTriangle, color: totalActiveComplaints > 0 ? 'bg-red-500' : 'bg-gray-400', bg: totalActiveComplaints > 0 ? 'bg-red-50' : 'bg-gray-50', text: totalActiveComplaints > 0 ? 'text-red-600' : 'text-gray-500' },
-        ].map(({ label, value, sub, icon: Icon, color, bg, text }) => (
+          { label: 'Occupancy Rate', value: `${stats?.occupancy_percentage.toFixed(1)}%`, sub: `${stats?.occupied_rooms}/${stats?.total_rooms} rooms`, icon: Hotel, color: 'bg-blue-500' },
+          { label: "Today's Check-ins", value: stats?.today_check_ins, sub: `Check-outs: ${stats?.today_check_outs}`, icon: Users, color: 'bg-green-500' },
+          { label: "Today's Revenue", value: `₦${(stats?.today_revenue || 0).toLocaleString()}`, sub: 'Daily total', icon: DollarSign, color: 'bg-purple-500' },
+          { label: 'Active Complaints', value: totalActiveComplaints, sub: totalActiveComplaints === 0 ? 'All clear!' : `${stats?.in_progress_complaints} in progress`, icon: AlertTriangle, color: totalActiveComplaints > 0 ? 'bg-red-500' : 'bg-gray-400' },
+        ].map(({ label, value, sub, icon: Icon, color }) => (
           <div key={label} className="card">
             <div className="flex items-start justify-between">
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-medium text-gray-500 mb-1">{label}</div>
-                <div className={`text-2xl font-bold text-gray-900`}>{value}</div>
+                <div className="text-2xl font-bold text-gray-900">{value}</div>
                 <div className="text-xs text-gray-400 mt-0.5">{sub}</div>
               </div>
               <div className={`w-10 h-10 ${color} rounded-xl flex items-center justify-center flex-shrink-0 ml-2`}>
@@ -172,6 +190,22 @@ export default function FrontOfficeDashboard() {
               )
             })}
           </div>
+
+          {/* My Performance shortcut */}
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <Link href="/front-office/my-revenue-report">
+              <div className="p-3 border border-emerald-200 bg-emerald-50 rounded-xl hover:bg-emerald-100 transition-colors flex items-center gap-3 cursor-pointer group">
+                <div className="w-9 h-9 bg-emerald-500 rounded-lg flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <BarChart3 className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-gray-800">My Revenue Report</div>
+                  <div className="text-xs text-gray-500">View your performance</div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-gray-400 ml-auto" />
+              </div>
+            </Link>
+          </div>
         </div>
 
         {/* Reports & Complaints Status */}
@@ -183,7 +217,7 @@ export default function FrontOfficeDashboard() {
                 <Clock className="w-4 h-4 text-yellow-600" />
                 <div>
                   <div className="text-sm font-semibold text-gray-800">Pending Reports</div>
-                  {(stats?.clarification_reports||0) > 0 && <div className="text-xs text-orange-600">{stats?.clarification_reports} need response</div>}
+                  {(stats?.clarification_reports || 0) > 0 && <div className="text-xs text-orange-600">{stats?.clarification_reports} need response</div>}
                 </div>
               </div>
               <div className="flex items-center gap-1.5">

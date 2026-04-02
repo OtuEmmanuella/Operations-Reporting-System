@@ -25,6 +25,14 @@ interface ManagerDetails {
   avgOccupancy?: number
 }
 
+interface RawManager {
+  id: string
+  full_name: string
+  email: string
+  role: 'manager' | 'front_office_manager'
+  branch?: string
+}
+
 type DateRangeOption = 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'custom'
 
 export default function BranchDetailsPage() {
@@ -43,9 +51,7 @@ export default function BranchDetailsPage() {
   }, [])
 
   useEffect(() => {
-    if (startDate && endDate) {
-      loadBranchManagers()
-    }
+    if (startDate && endDate) loadBranchManagers()
   }, [startDate, endDate])
 
   const updateDateRange = (option: DateRangeOption) => {
@@ -108,7 +114,9 @@ export default function BranchDetailsPage() {
 
       if (!allManagers) { setLoading(false); return }
 
-      const branchManagers = allManagers.filter((m: any) => {
+      const typedManagers = allManagers as RawManager[]
+
+      const branchManagers = typedManagers.filter(m => {
         const managerBranch = m.branch || m.email?.split('@')[1]?.split('.')[0] || 'Unknown'
         const managerBranchName = managerBranch.charAt(0).toUpperCase() + managerBranch.slice(1)
         return managerBranchName === branchName
@@ -132,23 +140,29 @@ export default function BranchDetailsPage() {
       const managerDetails: ManagerDetails[] = []
 
       for (const manager of branchManagers) {
-        if ((manager as any).role === 'manager') {
-          const managerReports = (stockReports.data || []).filter((r: any) => r.manager_id === (manager as any).id)
+        if (manager.role === 'manager') {
+          const managerReports = (stockReports.data || []).filter((r: Record<string, unknown>) => r.manager_id === manager.id)
           const salesRevenue = managerReports.reduce(
-            (sum: number, r: any) => sum + (r.cash_payments || 0) + (r.card_payments || 0) + (r.transfer_payments || 0), 0
+            (sum: number, r: Record<string, unknown>) =>
+              sum + ((r.cash_payments as number) || 0) + ((r.card_payments as number) || 0) + ((r.transfer_payments as number) || 0),
+            0
           )
-          const cashPayments = managerReports.reduce((sum: number, r: any) => sum + (r.cash_payments || 0), 0)
-          const cardPayments = managerReports.reduce((sum: number, r: any) => sum + (r.card_payments || 0), 0)
-          const transferPayments = managerReports.reduce((sum: number, r: any) => sum + (r.transfer_payments || 0), 0)
+          const cashPayments = managerReports.reduce((sum: number, r: Record<string, unknown>) => sum + ((r.cash_payments as number) || 0), 0)
+          const cardPayments = managerReports.reduce((sum: number, r: Record<string, unknown>) => sum + ((r.card_payments as number) || 0), 0)
+          const transferPayments = managerReports.reduce((sum: number, r: Record<string, unknown>) => sum + ((r.transfer_payments as number) || 0), 0)
 
           const managerItems = (stockItems.data || []).filter(
-            (item: any) => item.stock_inventory_reports.manager_id === (manager as any).id
+            (item: Record<string, unknown>) => {
+              const report = item.stock_inventory_reports as Record<string, unknown>
+              return report.manager_id === manager.id
+            }
           )
           const itemsMap: Record<string, { quantity: number; revenue: number }> = {}
-          managerItems.forEach((item: any) => {
-            if (!itemsMap[item.item_name]) itemsMap[item.item_name] = { quantity: 0, revenue: 0 }
-            itemsMap[item.item_name].quantity += item.quantity || 0
-            itemsMap[item.item_name].revenue += (item.quantity || 0) * (item.unit_price || 0)
+          managerItems.forEach((item: Record<string, unknown>) => {
+            const name = item.item_name as string
+            if (!itemsMap[name]) itemsMap[name] = { quantity: 0, revenue: 0 }
+            itemsMap[name].quantity += (item.quantity as number) || 0
+            itemsMap[name].revenue += ((item.quantity as number) || 0) * ((item.unit_price as number) || 0)
           })
           const topItems = Object.entries(itemsMap)
             .map(([name, data]) => ({ name, ...data }))
@@ -156,29 +170,29 @@ export default function BranchDetailsPage() {
             .slice(0, 3)
 
           managerDetails.push({
-            id: (manager as any).id,
-            name: (manager as any).full_name,
-            email: (manager as any).email,
-            role: (manager as any).role,
+            id: manager.id,
+            name: manager.full_name,
+            email: manager.email,
+            role: manager.role,
             totalRevenue: salesRevenue,
             reportsSubmitted: managerReports.length,
             salesRevenue, cashPayments, cardPayments, transferPayments, topItems,
           })
         } else {
-          const managerReports = (revenueReports.data || []).filter((r: any) => r.manager_id === (manager as any).id)
-          const managerOccupancy = (occupancyReports.data || []).filter((r: any) => r.manager_id === (manager as any).id)
-          const roomRevenue = managerReports.reduce((sum: number, r: any) => sum + (r.room_revenue || 0), 0)
-          const laundryRevenue = managerReports.reduce((sum: number, r: any) => sum + (r.laundry_revenue || 0), 0)
-          const otherRevenue = managerReports.reduce((sum: number, r: any) => sum + (r.other_services_revenue || 0), 0)
+          const managerReports = (revenueReports.data || []).filter((r: Record<string, unknown>) => r.manager_id === manager.id)
+          const managerOccupancy = (occupancyReports.data || []).filter((r: Record<string, unknown>) => r.manager_id === manager.id)
+          const roomRevenue = managerReports.reduce((sum: number, r: Record<string, unknown>) => sum + ((r.room_revenue as number) || 0), 0)
+          const laundryRevenue = managerReports.reduce((sum: number, r: Record<string, unknown>) => sum + ((r.laundry_revenue as number) || 0), 0)
+          const otherRevenue = managerReports.reduce((sum: number, r: Record<string, unknown>) => sum + ((r.other_services_revenue as number) || 0), 0)
           const avgOccupancy = managerOccupancy.length > 0
-            ? managerOccupancy.reduce((sum: number, r: any) => sum + (r.occupancy_percentage || 0), 0) / managerOccupancy.length
+            ? managerOccupancy.reduce((sum: number, r: Record<string, unknown>) => sum + ((r.occupancy_percentage as number) || 0), 0) / managerOccupancy.length
             : 0
 
           managerDetails.push({
-            id: (manager as any).id,
-            name: (manager as any).full_name,
-            email: (manager as any).email,
-            role: (manager as any).role,
+            id: manager.id,
+            name: manager.full_name,
+            email: manager.email,
+            role: manager.role,
             totalRevenue: roomRevenue + laundryRevenue + otherRevenue,
             reportsSubmitted: managerReports.length,
             roomRevenue, laundryRevenue, otherRevenue, avgOccupancy,
@@ -212,8 +226,6 @@ export default function BranchDetailsPage() {
   }
 
   const totalRevenue = managers.reduce((sum, m) => sum + m.totalRevenue, 0)
-
-  // Safe formatted date range label for display
   const dateRangeLabel = startDate && endDate
     ? `${format(new Date(startDate), 'MMM dd, yyyy')} - ${format(new Date(endDate), 'MMM dd, yyyy')}`
     : 'Loading...'
@@ -221,10 +233,7 @@ export default function BranchDetailsPage() {
   return (
     <div className="p-8 max-w-7xl mx-auto">
       <div className="mb-8">
-        <Link
-          href="/bdm/analytics/branch-performance"
-          className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-4 text-sm"
-        >
+        <Link href="/bdm/analytics/branch-performance" className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-4 text-sm">
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back to Branch Performance
         </Link>
@@ -260,9 +269,7 @@ export default function BranchDetailsPage() {
                 key={option.value}
                 onClick={() => updateDateRange(option.value)}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                  dateRangeOption === option.value
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-white text-gray-700 hover:bg-blue-100'
+                  dateRangeOption === option.value ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-blue-100'
                 }`}
               >
                 {option.label}
@@ -274,26 +281,13 @@ export default function BranchDetailsPage() {
             <div className="flex items-center gap-3 p-3 bg-white rounded-lg">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Start Date</label>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="input-field text-sm"
-                />
+                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="input-field text-sm" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">End Date</label>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="input-field text-sm"
-                />
+                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="input-field text-sm" />
               </div>
-              <button
-                onClick={handleCustomDateApply}
-                className="mt-5 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
-              >
+              <button onClick={handleCustomDateApply} className="mt-5 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
                 Apply
               </button>
             </div>
@@ -314,9 +308,7 @@ export default function BranchDetailsPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <div className="card bg-gradient-to-br from-green-50 to-emerald-50 border-green-200">
               <div className="text-sm text-gray-600 mb-1">Total Revenue</div>
-              <div className="text-2xl font-bold text-gray-900">
-                ₦{totalRevenue.toLocaleString('en-NG', { maximumFractionDigits: 0 })}
-              </div>
+              <div className="text-2xl font-bold text-gray-900">₦{totalRevenue.toLocaleString('en-NG', { maximumFractionDigits: 0 })}</div>
               <div className="text-xs text-gray-500 mt-1">All managers combined</div>
             </div>
             <div className="card">
@@ -330,15 +322,13 @@ export default function BranchDetailsPage() {
             <div className="card">
               <div className="text-sm text-gray-600 mb-1">Top Performer</div>
               <div className="text-lg font-bold text-green-600">{managers[0]?.name || 'N/A'}</div>
-              <div className="text-xs text-gray-500 mt-1">
-                ₦{(managers[0]?.totalRevenue || 0).toLocaleString('en-NG', { maximumFractionDigits: 0 })}
-              </div>
+              <div className="text-xs text-gray-500 mt-1">₦{(managers[0]?.totalRevenue || 0).toLocaleString('en-NG', { maximumFractionDigits: 0 })}</div>
             </div>
           </div>
 
           {/* Manager Cards */}
           <div className="space-y-4">
-            {managers.map((manager) => (
+            {managers.map(manager => (
               <div key={manager.id} className="card border-2 border-gray-200 hover:border-primary transition-colors">
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center space-x-4">
@@ -370,27 +360,19 @@ export default function BranchDetailsPage() {
                     <div className="grid grid-cols-4 gap-4 mb-4 p-4 bg-gray-50 rounded-lg">
                       <div>
                         <div className="text-xs text-gray-500 mb-1">Total Revenue</div>
-                        <div className="text-lg font-bold text-gray-900">
-                          ₦{manager.salesRevenue?.toLocaleString('en-NG', { maximumFractionDigits: 0 })}
-                        </div>
+                        <div className="text-lg font-bold text-gray-900">₦{manager.salesRevenue?.toLocaleString('en-NG', { maximumFractionDigits: 0 })}</div>
                       </div>
                       <div>
                         <div className="text-xs text-gray-500 mb-1">Cash</div>
-                        <div className="text-lg font-bold text-green-600">
-                          ₦{manager.cashPayments?.toLocaleString('en-NG', { maximumFractionDigits: 0 })}
-                        </div>
+                        <div className="text-lg font-bold text-green-600">₦{manager.cashPayments?.toLocaleString('en-NG', { maximumFractionDigits: 0 })}</div>
                       </div>
                       <div>
                         <div className="text-xs text-gray-500 mb-1">Card</div>
-                        <div className="text-lg font-bold text-blue-600">
-                          ₦{manager.cardPayments?.toLocaleString('en-NG', { maximumFractionDigits: 0 })}
-                        </div>
+                        <div className="text-lg font-bold text-blue-600">₦{manager.cardPayments?.toLocaleString('en-NG', { maximumFractionDigits: 0 })}</div>
                       </div>
                       <div>
                         <div className="text-xs text-gray-500 mb-1">Transfer</div>
-                        <div className="text-lg font-bold text-purple-600">
-                          ₦{manager.transferPayments?.toLocaleString('en-NG', { maximumFractionDigits: 0 })}
-                        </div>
+                        <div className="text-lg font-bold text-purple-600">₦{manager.transferPayments?.toLocaleString('en-NG', { maximumFractionDigits: 0 })}</div>
                       </div>
                     </div>
                     {manager.topItems && manager.topItems.length > 0 && (
@@ -410,27 +392,19 @@ export default function BranchDetailsPage() {
                   <div className="grid grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
                     <div>
                       <div className="text-xs text-gray-500 mb-1">Room Revenue</div>
-                      <div className="text-lg font-bold text-green-600">
-                        ₦{manager.roomRevenue?.toLocaleString('en-NG', { maximumFractionDigits: 0 })}
-                      </div>
+                      <div className="text-lg font-bold text-green-600">₦{manager.roomRevenue?.toLocaleString('en-NG', { maximumFractionDigits: 0 })}</div>
                     </div>
                     <div>
                       <div className="text-xs text-gray-500 mb-1">Laundry</div>
-                      <div className="text-lg font-bold text-blue-600">
-                        ₦{manager.laundryRevenue?.toLocaleString('en-NG', { maximumFractionDigits: 0 })}
-                      </div>
+                      <div className="text-lg font-bold text-blue-600">₦{manager.laundryRevenue?.toLocaleString('en-NG', { maximumFractionDigits: 0 })}</div>
                     </div>
                     <div>
                       <div className="text-xs text-gray-500 mb-1">Other Revenue</div>
-                      <div className="text-lg font-bold text-purple-600">
-                        ₦{manager.otherRevenue?.toLocaleString('en-NG', { maximumFractionDigits: 0 })}
-                      </div>
+                      <div className="text-lg font-bold text-purple-600">₦{manager.otherRevenue?.toLocaleString('en-NG', { maximumFractionDigits: 0 })}</div>
                     </div>
                     <div>
                       <div className="text-xs text-gray-500 mb-1">Avg Occupancy</div>
-                      <div className="text-lg font-bold text-orange-600">
-                        {manager.avgOccupancy?.toFixed(1)}%
-                      </div>
+                      <div className="text-lg font-bold text-orange-600">{manager.avgOccupancy?.toFixed(1)}%</div>
                     </div>
                   </div>
                 )}
@@ -441,9 +415,7 @@ export default function BranchDetailsPage() {
               <div className="card text-center py-12">
                 <User className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                 <h3 className="text-xl font-bold text-gray-900 mb-2">No Managers Found</h3>
-                <p className="text-gray-600">
-                  No managers found for {branchName} branch in the selected date range
-                </p>
+                <p className="text-gray-600">No managers found for {branchName} branch in the selected date range</p>
               </div>
             )}
           </div>

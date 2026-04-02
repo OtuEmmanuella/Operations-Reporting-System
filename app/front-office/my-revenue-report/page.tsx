@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { useParams, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Download, Hotel, Calendar } from 'lucide-react'
 import { format, subDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek } from 'date-fns'
+import Link from 'next/link'
+
+interface UserProfile { id: string; full_name: string }
 
 interface OtherRevenueItem {
   type: string
@@ -28,16 +30,13 @@ interface DailyRevenue {
 
 type DateRangeOption = 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'custom'
 
-export default function ManagerRevenueDetailPage() {
-  const params = useParams()
-  const searchParams = useSearchParams()
-
-  const managerId = params.id as string
-  const managerName = searchParams.get('name') || 'Front Office Manager'
+export default function MyRevenueReportPage() {
+  const [managerId, setManagerId] = useState<string | null>(null)
+  const [managerName, setManagerName] = useState('My Revenue Report')
 
   const [dateRangeOption, setDateRangeOption] = useState<DateRangeOption>('this_week')
-  const [startDate, setStartDate] = useState(searchParams.get('start') || '')
-  const [endDate, setEndDate] = useState(searchParams.get('end') || '')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
   const [showCustomDates, setShowCustomDates] = useState(false)
   const [expandedOtherRows, setExpandedOtherRows] = useState<Set<number>>(new Set())
 
@@ -49,12 +48,27 @@ export default function ManagerRevenueDetailPage() {
   })
 
   useEffect(() => {
-    if (searchParams.get('start') && searchParams.get('end')) {
-      loadRevenueDetail(searchParams.get('start')!, searchParams.get('end')!)
-    } else {
-      updateDateRange('this_week')
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      // Cast to typed interface to avoid Supabase never inference
+      const { data } = await supabase
+        .from('users')
+        .select('id, full_name')
+        .eq('id', user.id)
+        .single()
+      const profile = data as UserProfile | null
+      if (profile) {
+        setManagerId(profile.id)
+        setManagerName(profile.full_name)
+      }
     }
+    init()
   }, [])
+
+  useEffect(() => {
+    if (managerId) updateDateRange('this_week')
+  }, [managerId])
 
   const updateDateRange = (option: DateRangeOption) => {
     const today = new Date()
@@ -74,16 +88,18 @@ export default function ManagerRevenueDetailPage() {
         start = startOfMonth(lm); end = endOfMonth(lm); break
       }
       case 'custom': setShowCustomDates(true); setDateRangeOption('custom'); return
-      default:
-        start = startOfWeek(today, { weekStartsOn: 1 }); end = endOfWeek(today, { weekStartsOn: 1 })
+      default: start = startOfWeek(today, { weekStartsOn: 1 }); end = endOfWeek(today, { weekStartsOn: 1 })
     }
     const s = format(start, 'yyyy-MM-dd'), e = format(end, 'yyyy-MM-dd')
     setStartDate(s); setEndDate(e); setShowCustomDates(false); setDateRangeOption(option)
-    loadRevenueDetail(s, e)
+    if (managerId) loadRevenueDetail(managerId, s, e)
   }
 
   const handleCustomApply = () => {
-    if (startDate && endDate) { setDateRangeOption('custom'); setShowCustomDates(false); loadRevenueDetail(startDate, endDate) }
+    if (startDate && endDate && managerId) {
+      setDateRangeOption('custom'); setShowCustomDates(false)
+      loadRevenueDetail(managerId, startDate, endDate)
+    }
   }
 
   const parseOtherServicesFromNotes = (notes: string | null): OtherRevenueItem[] => {
@@ -97,15 +113,15 @@ export default function ManagerRevenueDetailPage() {
     } catch { return [] }
   }
 
-  const loadRevenueDetail = async (start: string, end: string) => {
+  const loadRevenueDetail = async (id: string, start: string, end: string) => {
     setLoading(true)
     try {
       const [revenueReports, occupancyReports] = await Promise.all([
         supabase.from('revenue_reports').select('*')
-          .eq('manager_id', managerId).gte('report_date', start).lte('report_date', end)
+          .eq('manager_id', id).gte('report_date', start).lte('report_date', end)
           .eq('status', 'approved').order('report_date'),
         supabase.from('occupancy_reports').select('*')
-          .eq('manager_id', managerId).gte('report_date', start).lte('report_date', end)
+          .eq('manager_id', id).gte('report_date', start).lte('report_date', end)
           .eq('status', 'approved').order('report_date')
       ])
 
@@ -145,7 +161,7 @@ export default function ManagerRevenueDetailPage() {
     const next = new Set(prev); next.has(i) ? next.delete(i) : next.add(i); return next
   })
 
-  const naira = (n: number) => `₦${n.toLocaleString('en-NG', { maximumFractionDigits: 0 })}`
+  const nairaFmt = (n: number) => `₦${n.toLocaleString('en-NG', { maximumFractionDigits: 0 })}`
 
   const exportToExcel = async () => {
     const XLSX = await import('xlsx')
@@ -154,20 +170,12 @@ export default function ManagerRevenueDetailPage() {
       ? `${format(new Date(startDate), 'MMM dd, yyyy')} - ${format(new Date(endDate), 'MMM dd, yyyy')}`
       : 'All time'
 
-    // Sheet 1 — Summary
     const s1: (string | number)[][] = [
-      [`${managerName} — Revenue Report`],
-      [`Period: ${period}`],
-      [],
-      ['REVENUE SUMMARY', ''],
-      ['Category', 'Amount (₦)'],
-      ['Room Revenue', totalStats.totalRoom],
-      ['Laundry Revenue', totalStats.totalLaundry],
-      ['Other Services Revenue', totalStats.totalOther],
-      ['TOTAL REVENUE', totalStats.totalRevenue],
-      [],
-      ['OCCUPANCY SUMMARY', ''],
-      ['Metric', 'Value'],
+      [`${managerName} — My Revenue Report`], [`Period: ${period}`], [],
+      ['REVENUE SUMMARY', ''], ['Category', 'Amount (₦)'],
+      ['Room Revenue', totalStats.totalRoom], ['Laundry Revenue', totalStats.totalLaundry],
+      ['Other Services Revenue', totalStats.totalOther], ['TOTAL REVENUE', totalStats.totalRevenue],
+      [], ['OCCUPANCY SUMMARY', ''], ['Metric', 'Value'],
       ['Average Occupancy', `${totalStats.avgOccupancy.toFixed(1)}%`],
       ['Total Room Nights Sold', totalStats.totalRoomNights],
     ]
@@ -175,7 +183,6 @@ export default function ManagerRevenueDetailPage() {
     ws1['!cols'] = [{ wch: 32 }, { wch: 22 }]
     XLSX.utils.book_append_sheet(wb, ws1, 'Summary')
 
-    // Sheet 2 — Daily Breakdown
     const s2: (string | number)[][] = [
       ['Date', 'Room Revenue (₦)', 'Laundry Revenue (₦)', 'Other Revenue (₦)', 'Total Revenue (₦)', 'Occupancy %', 'Total Rooms', 'Occupied Rooms']
     ]
@@ -190,55 +197,23 @@ export default function ManagerRevenueDetailPage() {
     ws2['!cols'] = [{ wch: 24 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 16 }]
     XLSX.utils.book_append_sheet(wb, ws2, 'Daily Breakdown')
 
-    // Sheet 3 — Other Revenue Detail
-    const s3: (string | number)[][] = [
-      ['Date', 'Service Type', 'Total (₦)', 'Cash (₦)', 'Card Total (₦)', 'Card Banks', 'Transfer Total (₦)', 'Transfer Banks']
-    ]
-    let hasOtherDetail = false
-    dailyRevenue.forEach(d => {
-      if (d.otherRevenueItems.length > 0) {
-        hasOtherDetail = true
-        d.otherRevenueItems.forEach(item => {
-          const cardTotal = item.card.reduce((s, p) => s + p.amount, 0)
-          const transferTotal = item.transfer.reduce((s, p) => s + p.amount, 0)
-          s3.push([
-            format(new Date(d.date), 'EEE MMM dd yyyy'),
-            item.type, item.amount, item.cash || 0, cardTotal,
-            item.card.filter(p => p.amount > 0).map(p => `${p.bank}: ${naira(p.amount)}`).join(' | ') || '—',
-            transferTotal,
-            item.transfer.filter(p => p.amount > 0).map(p => `${p.bank}: ${naira(p.amount)}`).join(' | ') || '—',
-          ])
-        })
-      } else if (d.otherRevenue > 0) {
-        hasOtherDetail = true
-        s3.push([format(new Date(d.date), 'EEE MMM dd yyyy'), 'Other Services', d.otherRevenue, '—', '—', '—', '—', '—'])
-      }
-    })
-    if (hasOtherDetail) {
-      const ws3 = XLSX.utils.aoa_to_sheet(s3)
-      ws3['!cols'] = [{ wch: 24 }, { wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 32 }, { wch: 16 }, { wch: 32 }]
-      XLSX.utils.book_append_sheet(wb, ws3, 'Other Revenue Detail')
-    }
-
-    XLSX.writeFile(wb, `${managerName.replace(/\s+/g, '-')}-revenue-${format(new Date(), 'yyyy-MM-dd')}.xlsx`)
+    XLSX.writeFile(wb, `my-revenue-report-${format(new Date(), 'yyyy-MM-dd')}.xlsx`)
   }
 
   const dateRangeLabel = startDate && endDate
     ? `${format(new Date(startDate), 'MMM dd, yyyy')} - ${format(new Date(endDate), 'MMM dd, yyyy')}`
     : 'Select a date range'
 
-  const nairaFmt = (n: number) => `₦${n.toLocaleString('en-NG', { maximumFractionDigits: 0 })}`
-
   return (
     <div className="p-8 max-w-7xl mx-auto">
       <div className="mb-8">
-        <button onClick={() => window.history.back()} className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-4 text-sm">
-          <ArrowLeft className="w-4 h-4 mr-2" />Back
-        </button>
+        <Link href="/front-office/dashboard" className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-4 text-sm">
+          <ArrowLeft className="w-4 h-4 mr-2" />Back to Dashboard
+        </Link>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">{managerName}</h1>
-            <p className="text-gray-600">Detailed Revenue & Occupancy Report • {dateRangeLabel}</p>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">My Revenue Performance</h1>
+            <p className="text-gray-600">Your approved revenue reports • {dateRangeLabel}</p>
           </div>
           <button onClick={exportToExcel} className="btn-primary flex items-center space-x-2">
             <Download className="w-4 h-4" /><span>Export to Excel</span>
@@ -284,7 +259,7 @@ export default function ManagerRevenueDetailPage() {
         <div className="flex items-center justify-center py-20">
           <div className="text-center">
             <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <div className="text-lg text-gray-600">Loading revenue details...</div>
+            <div className="text-lg text-gray-600">Loading your revenue data...</div>
           </div>
         </div>
       ) : (
@@ -295,26 +270,11 @@ export default function ManagerRevenueDetailPage() {
               <div className="text-xs text-gray-600 mb-1">Total Revenue</div>
               <div className="text-xl font-bold text-gray-900">{nairaFmt(totalStats.totalRevenue)}</div>
             </div>
-            <div className="card">
-              <div className="text-xs text-gray-600 mb-1">Room Revenue</div>
-              <div className="text-xl font-bold text-green-600">{nairaFmt(totalStats.totalRoom)}</div>
-            </div>
-            <div className="card">
-              <div className="text-xs text-gray-600 mb-1">Laundry</div>
-              <div className="text-xl font-bold text-blue-600">{nairaFmt(totalStats.totalLaundry)}</div>
-            </div>
-            <div className="card">
-              <div className="text-xs text-gray-600 mb-1">Other Revenue</div>
-              <div className="text-xl font-bold text-purple-600">{nairaFmt(totalStats.totalOther)}</div>
-            </div>
-            <div className="card">
-              <div className="text-xs text-gray-600 mb-1">Avg Occupancy</div>
-              <div className="text-xl font-bold text-orange-600">{totalStats.avgOccupancy.toFixed(1)}%</div>
-            </div>
-            <div className="card">
-              <div className="text-xs text-gray-600 mb-1">Room Nights</div>
-              <div className="text-xl font-bold text-gray-900">{totalStats.totalRoomNights}</div>
-            </div>
+            <div className="card"><div className="text-xs text-gray-600 mb-1">Room Revenue</div><div className="text-xl font-bold text-green-600">{nairaFmt(totalStats.totalRoom)}</div></div>
+            <div className="card"><div className="text-xs text-gray-600 mb-1">Laundry</div><div className="text-xl font-bold text-blue-600">{nairaFmt(totalStats.totalLaundry)}</div></div>
+            <div className="card"><div className="text-xs text-gray-600 mb-1">Other Revenue</div><div className="text-xl font-bold text-purple-600">{nairaFmt(totalStats.totalOther)}</div></div>
+            <div className="card"><div className="text-xs text-gray-600 mb-1">Avg Occupancy</div><div className="text-xl font-bold text-orange-600">{totalStats.avgOccupancy.toFixed(1)}%</div></div>
+            <div className="card"><div className="text-xs text-gray-600 mb-1">Room Nights</div><div className="text-xl font-bold text-gray-900">{totalStats.totalRoomNights}</div></div>
           </div>
 
           {/* Daily Revenue Table */}
@@ -340,9 +300,7 @@ export default function ManagerRevenueDetailPage() {
                   {dailyRevenue.map((day, index) => (
                     <>
                       <tr key={`row-${index}`} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                          {format(new Date(day.date), 'EEE, MMM dd yyyy')}
-                        </td>
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{format(new Date(day.date), 'EEE, MMM dd yyyy')}</td>
                         <td className="px-4 py-3 text-sm text-right text-green-600 font-semibold">{nairaFmt(day.roomRevenue)}</td>
                         <td className="px-4 py-3 text-sm text-right text-blue-600">{nairaFmt(day.laundryRevenue)}</td>
                         <td className="px-4 py-3 text-sm text-right text-purple-600">
@@ -351,9 +309,7 @@ export default function ManagerRevenueDetailPage() {
                             {day.otherRevenueItems.length > 0 && (
                               <button onClick={() => toggleOtherRow(index)}
                                 className="text-xs bg-purple-100 text-purple-700 hover:bg-purple-200 px-2 py-0.5 rounded-full whitespace-nowrap">
-                                {expandedOtherRows.has(index)
-                                  ? 'hide'
-                                  : day.otherRevenueItems.map(i => i.type).join(', ')}
+                                {expandedOtherRows.has(index) ? 'hide' : day.otherRevenueItems.map(i => i.type).join(', ')}
                               </button>
                             )}
                           </div>
@@ -368,8 +324,6 @@ export default function ManagerRevenueDetailPage() {
                         </td>
                         <td className="px-4 py-3 text-sm text-center text-gray-600">{day.occupiedRooms} / {day.totalRooms}</td>
                       </tr>
-
-                      {/* Inline other revenue breakdown */}
                       {expandedOtherRows.has(index) && day.otherRevenueItems.length > 0 && (
                         <tr key={`expand-${index}`}>
                           <td colSpan={7} className="px-6 py-3 bg-purple-50 border-b border-purple-100">
@@ -412,7 +366,7 @@ export default function ManagerRevenueDetailPage() {
             {dailyRevenue.length === 0 && (
               <div className="text-center py-12">
                 <Calendar className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-600">No revenue data for this period</p>
+                <p className="text-gray-600">No approved revenue reports found for this period</p>
               </div>
             )}
           </div>

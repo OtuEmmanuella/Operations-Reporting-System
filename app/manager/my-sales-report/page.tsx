@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { useParams, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Download, Package, DollarSign, Calendar, ClipboardList } from 'lucide-react'
 import { format, subDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek } from 'date-fns'
+import Link from 'next/link'
+
+interface UserProfile { id: string; full_name: string }
 
 interface ItemSale {
   itemName: string
@@ -32,16 +34,13 @@ interface DailyPayments {
 
 type DateRangeOption = 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'custom'
 
-export default function ManagerSalesDetailPage() {
-  const params = useParams()
-  const searchParams = useSearchParams()
-
-  const managerId = params.id as string
-  const managerName = searchParams.get('name') || 'Manager'
+export default function MySalesReportPage() {
+  const [managerId, setManagerId] = useState<string | null>(null)
+  const [managerName, setManagerName] = useState('My Sales Report')
 
   const [dateRangeOption, setDateRangeOption] = useState<DateRangeOption>('this_week')
-  const [startDate, setStartDate] = useState(searchParams.get('start') || '')
-  const [endDate, setEndDate] = useState(searchParams.get('end') || '')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
   const [showCustomDates, setShowCustomDates] = useState(false)
 
   const [loading, setLoading] = useState(true)
@@ -54,12 +53,27 @@ export default function ManagerSalesDetailPage() {
   })
 
   useEffect(() => {
-    if (searchParams.get('start') && searchParams.get('end')) {
-      loadSalesDetail(searchParams.get('start')!, searchParams.get('end')!)
-    } else {
-      updateDateRange('this_week')
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      // Cast to typed interface to avoid Supabase never inference
+      const { data } = await supabase
+        .from('users')
+        .select('id, full_name')
+        .eq('id', user.id)
+        .single()
+      const profile = data as UserProfile | null
+      if (profile) {
+        setManagerId(profile.id)
+        setManagerName(profile.full_name)
+      }
     }
+    init()
   }, [])
+
+  useEffect(() => {
+    if (managerId) updateDateRange('this_week')
+  }, [managerId])
 
   const updateDateRange = (option: DateRangeOption) => {
     const today = new Date()
@@ -79,34 +93,35 @@ export default function ManagerSalesDetailPage() {
         start = startOfMonth(lm); end = endOfMonth(lm); break
       }
       case 'custom': setShowCustomDates(true); setDateRangeOption('custom'); return
-      default:
-        start = startOfWeek(today, { weekStartsOn: 1 }); end = endOfWeek(today, { weekStartsOn: 1 })
+      default: start = startOfWeek(today, { weekStartsOn: 1 }); end = endOfWeek(today, { weekStartsOn: 1 })
     }
     const s = format(start, 'yyyy-MM-dd'), e = format(end, 'yyyy-MM-dd')
     setStartDate(s); setEndDate(e); setShowCustomDates(false); setDateRangeOption(option)
-    loadSalesDetail(s, e)
+    if (managerId) loadSalesDetail(managerId, s, e)
   }
 
   const handleCustomApply = () => {
-    if (startDate && endDate) { setDateRangeOption('custom'); setShowCustomDates(false); loadSalesDetail(startDate, endDate) }
+    if (startDate && endDate && managerId) {
+      setDateRangeOption('custom'); setShowCustomDates(false)
+      loadSalesDetail(managerId, startDate, endDate)
+    }
   }
 
-  const loadSalesDetail = async (start: string, end: string) => {
+  const loadSalesDetail = async (id: string, start: string, end: string) => {
     setLoading(true)
     try {
       const [stockReports, stockItems] = await Promise.all([
         supabase.from('stock_inventory_reports').select('*')
-          .eq('manager_id', managerId).gte('report_date', start).lte('report_date', end)
+          .eq('manager_id', id).gte('report_date', start).lte('report_date', end)
           .eq('status', 'approved').order('report_date'),
         supabase.from('stock_inventory_items')
           .select('*, stock_inventory_reports!inner(report_date, manager_id, status)')
-          .eq('stock_inventory_reports.manager_id', managerId)
+          .eq('stock_inventory_reports.manager_id', id)
           .gte('stock_inventory_reports.report_date', start)
           .lte('stock_inventory_reports.report_date', end)
           .eq('stock_inventory_reports.status', 'approved')
       ])
 
-      // Daily payments
       const payments: DailyPayments[] = (stockReports.data || []).map((r: Record<string, unknown>) => ({
         date: r.report_date as string,
         cash: (r.cash_payments as number) || 0,
@@ -116,12 +131,11 @@ export default function ManagerSalesDetailPage() {
       }))
       setDailyPayments(payments)
 
-      const allItems = stockItems.data || []
+      const allItems = (stockItems.data || []) as Record<string, unknown>[]
 
-      // Sales items (section = 'sales')
-      const salesItems = allItems.filter((i: Record<string, unknown>) => i.item_section === 'sales')
+      const salesItems = allItems.filter(i => i.item_section === 'sales')
       const salesMap: Record<string, { quantity: number; unitPrice: number; revenue: number; frequency: number; dailyBreakdown: { date: string; quantity: number; revenue: number }[] }> = {}
-      salesItems.forEach((item: Record<string, unknown>) => {
+      salesItems.forEach(item => {
         const name = item.item_name as string
         const report = item.stock_inventory_reports as Record<string, unknown>
         const date = report.report_date as string
@@ -139,10 +153,9 @@ export default function ManagerSalesDetailPage() {
         .sort((a, b) => b.totalRevenue - a.totalRevenue)
       setItemsSold(items)
 
-      // Requisition items (section = 'requisition' or similar non-sales sections)
-      const reqItems = allItems.filter((i: Record<string, unknown>) => i.item_section !== 'sales')
+      const reqItems = allItems.filter(i => i.item_section !== 'sales')
       const reqMap: Record<string, { quantity: number; unit: string; frequency: number }> = {}
-      reqItems.forEach((item: Record<string, unknown>) => {
+      reqItems.forEach(item => {
         const name = item.item_name as string
         const qty = (item.quantity as number) || 0
         const unit = (item.unit as string) || ''
@@ -161,7 +174,6 @@ export default function ManagerSalesDetailPage() {
       const totalTransfer = payments.reduce((s, p) => s + p.transfer, 0)
       const totalItemsSold = items.reduce((s, i) => s + i.totalQuantity, 0)
       setTotalStats({ totalRevenue, totalCash, totalCard, totalTransfer, totalItemsSold, uniqueItems: items.length })
-
     } catch (error) { console.error('Error loading sales detail:', error) }
     finally { setLoading(false) }
   }
@@ -175,20 +187,12 @@ export default function ManagerSalesDetailPage() {
       ? `${format(new Date(startDate), 'MMM dd, yyyy')} - ${format(new Date(endDate), 'MMM dd, yyyy')}`
       : 'All time'
 
-    // Sheet 1 — Summary
     const s1: (string | number)[][] = [
-      [`${managerName} — Sales Report`],
-      [`Period: ${period}`],
-      [],
-      ['PAYMENT SUMMARY', ''],
-      ['Payment Type', 'Amount (₦)'],
-      ['Cash', totalStats.totalCash],
-      ['Card / POS', totalStats.totalCard],
-      ['Transfer', totalStats.totalTransfer],
-      ['TOTAL REVENUE', totalStats.totalRevenue],
-      [],
-      ['ITEMS SUMMARY', ''],
-      ['Metric', 'Value'],
+      [`${managerName} — My Sales Report`], [`Period: ${period}`], [],
+      ['PAYMENT SUMMARY', ''], ['Payment Type', 'Amount (₦)'],
+      ['Cash', totalStats.totalCash], ['Card / POS', totalStats.totalCard],
+      ['Transfer', totalStats.totalTransfer], ['TOTAL REVENUE', totalStats.totalRevenue],
+      [], ['ITEMS SUMMARY', ''], ['Metric', 'Value'],
       ['Total Items Sold (qty)', totalStats.totalItemsSold],
       ['Unique Products Sold', totalStats.uniqueItems],
       ['Requisition Items', requisitionItems.length],
@@ -197,38 +201,29 @@ export default function ManagerSalesDetailPage() {
     ws1['!cols'] = [{ wch: 30 }, { wch: 22 }]
     XLSX.utils.book_append_sheet(wb, ws1, 'Summary')
 
-    // Sheet 2 — Items Sold
-    const s2: (string | number)[][] = [
-      ['#', 'Item Name', 'Unit Price (₦)', 'Total Qty Sold', 'Total Revenue (₦)', 'Days Sold']
-    ]
+    const s2: (string | number)[][] = [['#', 'Item Name', 'Unit Price (₦)', 'Total Qty Sold', 'Total Revenue (₦)', 'Days Sold']]
     itemsSold.forEach((item, i) => s2.push([i + 1, item.itemName, item.unitPrice, item.totalQuantity, item.totalRevenue, item.frequency]))
     s2.push(['', 'TOTAL', '', totalStats.totalItemsSold, totalStats.totalRevenue, ''])
     const ws2 = XLSX.utils.aoa_to_sheet(s2)
     ws2['!cols'] = [{ wch: 5 }, { wch: 30 }, { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 12 }]
     XLSX.utils.book_append_sheet(wb, ws2, 'Items Sold')
 
-    // Sheet 3 — Daily Payments
-    const s3: (string | number)[][] = [
-      ['Date', 'Cash (₦)', 'Card (₦)', 'Transfer (₦)', 'Total (₦)']
-    ]
+    const s3: (string | number)[][] = [['Date', 'Cash (₦)', 'Card (₦)', 'Transfer (₦)', 'Total (₦)']]
     dailyPayments.forEach(p => s3.push([format(new Date(p.date), 'EEE MMM dd yyyy'), p.cash, p.card, p.transfer, p.total]))
     s3.push(['TOTAL', totalStats.totalCash, totalStats.totalCard, totalStats.totalTransfer, totalStats.totalRevenue])
     const ws3 = XLSX.utils.aoa_to_sheet(s3)
     ws3['!cols'] = [{ wch: 24 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 16 }]
     XLSX.utils.book_append_sheet(wb, ws3, 'Daily Payments')
 
-    // Sheet 4 — Requisitions (only if there are any)
     if (requisitionItems.length > 0) {
-      const s4: (string | number)[][] = [
-        ['#', 'Item Name', 'Total Qty Requisitioned', 'Unit', 'Number of Reports']
-      ]
+      const s4: (string | number)[][] = [['#', 'Item Name', 'Total Qty Requisitioned', 'Unit', 'Number of Reports']]
       requisitionItems.forEach((item, i) => s4.push([i + 1, item.itemName, item.totalQuantity, item.unit || '—', item.frequency]))
       const ws4 = XLSX.utils.aoa_to_sheet(s4)
       ws4['!cols'] = [{ wch: 5 }, { wch: 30 }, { wch: 24 }, { wch: 12 }, { wch: 18 }]
       XLSX.utils.book_append_sheet(wb, ws4, 'Requisitions')
     }
 
-    XLSX.writeFile(wb, `${managerName.replace(/\s+/g, '-')}-sales-${format(new Date(), 'yyyy-MM-dd')}.xlsx`)
+    XLSX.writeFile(wb, `my-sales-report-${format(new Date(), 'yyyy-MM-dd')}.xlsx`)
   }
 
   const dateRangeLabel = startDate && endDate
@@ -238,13 +233,13 @@ export default function ManagerSalesDetailPage() {
   return (
     <div className="p-8 max-w-7xl mx-auto">
       <div className="mb-8">
-        <button onClick={() => window.history.back()} className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-4 text-sm">
-          <ArrowLeft className="w-4 h-4 mr-2" />Back
-        </button>
+        <Link href="/manager/dashboard" className="inline-flex items-center text-gray-600 hover:text-gray-900 mb-4 text-sm">
+          <ArrowLeft className="w-4 h-4 mr-2" />Back to Dashboard
+        </Link>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">{managerName}</h1>
-            <p className="text-gray-600">Detailed Sales Report • {dateRangeLabel}</p>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">My Sales Performance</h1>
+            <p className="text-gray-600">Your approved sales reports • {dateRangeLabel}</p>
           </div>
           <button onClick={exportToExcel} className="btn-primary flex items-center space-x-2">
             <Download className="w-4 h-4" /><span>Export to Excel</span>
@@ -290,7 +285,7 @@ export default function ManagerSalesDetailPage() {
         <div className="flex items-center justify-center py-20">
           <div className="text-center">
             <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <div className="text-lg text-gray-600">Loading sales details...</div>
+            <div className="text-lg text-gray-600">Loading your sales data...</div>
           </div>
         </div>
       ) : (
@@ -301,26 +296,11 @@ export default function ManagerSalesDetailPage() {
               <div className="text-xs text-gray-600 mb-1">Total Revenue</div>
               <div className="text-xl font-bold text-gray-900">{nairaFmt(totalStats.totalRevenue)}</div>
             </div>
-            <div className="card">
-              <div className="text-xs text-gray-600 mb-1">Cash</div>
-              <div className="text-xl font-bold text-green-600">{nairaFmt(totalStats.totalCash)}</div>
-            </div>
-            <div className="card">
-              <div className="text-xs text-gray-600 mb-1">Card</div>
-              <div className="text-xl font-bold text-blue-600">{nairaFmt(totalStats.totalCard)}</div>
-            </div>
-            <div className="card">
-              <div className="text-xs text-gray-600 mb-1">Transfer</div>
-              <div className="text-xl font-bold text-purple-600">{nairaFmt(totalStats.totalTransfer)}</div>
-            </div>
-            <div className="card">
-              <div className="text-xs text-gray-600 mb-1">Items Sold</div>
-              <div className="text-xl font-bold text-gray-900">{totalStats.totalItemsSold}</div>
-            </div>
-            <div className="card">
-              <div className="text-xs text-gray-600 mb-1">Unique Items</div>
-              <div className="text-xl font-bold text-gray-900">{totalStats.uniqueItems}</div>
-            </div>
+            <div className="card"><div className="text-xs text-gray-600 mb-1">Cash</div><div className="text-xl font-bold text-green-600">{nairaFmt(totalStats.totalCash)}</div></div>
+            <div className="card"><div className="text-xs text-gray-600 mb-1">Card</div><div className="text-xl font-bold text-blue-600">{nairaFmt(totalStats.totalCard)}</div></div>
+            <div className="card"><div className="text-xs text-gray-600 mb-1">Transfer</div><div className="text-xl font-bold text-purple-600">{nairaFmt(totalStats.totalTransfer)}</div></div>
+            <div className="card"><div className="text-xs text-gray-600 mb-1">Items Sold</div><div className="text-xl font-bold text-gray-900">{totalStats.totalItemsSold}</div></div>
+            <div className="card"><div className="text-xs text-gray-600 mb-1">Unique Items</div><div className="text-xl font-bold text-gray-900">{totalStats.uniqueItems}</div></div>
           </div>
 
           {/* Items Sold Table */}
@@ -371,12 +351,12 @@ export default function ManagerSalesDetailPage() {
             {itemsSold.length === 0 && (
               <div className="text-center py-12">
                 <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-600">No items sold in this period</p>
+                <p className="text-gray-600">No approved sales reports found for this period</p>
               </div>
             )}
           </div>
 
-          {/* Requisitioned Items Table */}
+          {/* Requisitioned Items */}
           {requisitionItems.length > 0 && (
             <div className="card mb-8">
               <div className="flex items-center space-x-2 mb-4">
@@ -414,7 +394,7 @@ export default function ManagerSalesDetailPage() {
             </div>
           )}
 
-          {/* Daily Payments Table */}
+          {/* Daily Payments */}
           <div className="card">
             <div className="flex items-center space-x-2 mb-4">
               <DollarSign className="w-5 h-5 text-green-600" />
